@@ -291,13 +291,16 @@ def exchange(code, cfg):
             "token_uri": TOKEN_URI,
             "client_id": cfg["client_id"], "client_secret": cfg["client_secret"],
             "scopes": t.get("scope", " ".join(SCOPES)).split(),
-            "expiry": exp.isoformat()}
+            "expiry": exp.replace(tzinfo=None).isoformat()}   # naive UTC (lihat creds_from_dict)
 
 
 def creds_from_dict(d):
     d = dict(d)
     if d.get("expiry"):
-        d["expiry"] = datetime.fromisoformat(d["expiry"])
+        # google-auth membandingkan expiry dengan utcnow() yang naive; expiry
+        # aware -> "can't compare offset-naive and offset-aware datetimes".
+        e = datetime.fromisoformat(d["expiry"])
+        d["expiry"] = e.astimezone(timezone.utc).replace(tzinfo=None) if e.tzinfo else e
     return Credentials(**d)
 
 
@@ -398,7 +401,11 @@ def _selftest():
     c = {"token": "t", "refresh_token": "r", "token_uri": TOKEN_URI,
          "client_id": "i", "client_secret": "s", "scopes": ["x"],
          "expiry": "2099-01-01T00:00:00+00:00"}
-    assert creds_from_dict(c).refresh_token == "r"
+    cr = creds_from_dict(c)
+    assert cr.refresh_token == "r"
+    # expiry aware dari data lama tak boleh bikin crash naive/aware (bug nyata)
+    assert cr.expired is False
+    assert cr.expiry.tzinfo is None
     print("auth selftest ok")
 
 
