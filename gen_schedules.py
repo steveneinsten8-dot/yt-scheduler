@@ -32,8 +32,11 @@ def parse_txt(text, lead_min=10, gap_min=30, privacy="public"):
     """Teks TXT -> list jadwal. Waktu otomatis: sekarang + lead, tiap entri +gap."""
     blocks = re.split(r"\n[ \t]*\n", text.strip())
     merged = []
-    for b in blocks:                       # gabung blok hashtag ke jadwal sebelumnya
-        if merged and b.lstrip().startswith("#"):
+    for b in blocks:
+        # Blok yang mulai dengan #/📺/🗒️ bukan jadwal baru, melainkan lanjutan
+        # jadwal sebelumnya. File scraper menyisipkan baris kosong sebelum 📺
+        # saat tak ada baris maskot -> tanpa ini, 📺 jadi "judul" jadwal baru.
+        if merged and b.lstrip().startswith(("#", "📺", "🗒️")):
             merged[-1] += "\n" + b
         else:
             merged.append(b)
@@ -112,6 +115,19 @@ Team A vs Team B
     assert "Archangels @ Bears" in a["description"]
     assert "#Alaska" in a["description"]            # hashtag masuk deskripsi
     assert got[1]["title"] == "Second Game — Team A vs Team B"
+    # tanpa baris maskot: scraper menyisipkan baris kosong sebelum 📺.
+    # Blok 📺/🗒️ harus menempel ke jadwal sebelumnya, BUKAN jadi judul baru.
+    txt2 = """A vs B
+State High School Football
+
+📺watch live: https://x/y
+🗒️A @ B, starts at 7p
+
+#Tag"""
+    g2 = parse_txt(txt2)
+    assert len(g2) == 1, g2
+    assert g2[0]["title"] == "A vs B — State High School Football", g2[0]["title"]
+    assert g2[0]["comment"].startswith("watch live:"), g2[0]["comment"]
     # waktu: naik gap menit, format benar
     t0 = datetime.strptime(a["start"], "%Y-%m-%d %H:%M")
     t1 = datetime.strptime(got[1]["start"], "%Y-%m-%d %H:%M")
