@@ -72,6 +72,27 @@ def ping():
     return True, "terhubung"
 
 
+def _raise(r):
+    """Ubah error HTTP Supabase jadi pesan yang bisa dibaca user (bukan
+    'HTTPError' teredaksi). PostgREST balas JSON {"code","message","details"}."""
+    if r.status_code < 400:
+        return
+    try:
+        j = r.json()
+        msg = j.get("message") or j.get("hint") or r.text
+        code = j.get("code", "")
+    except Exception:
+        msg, code = r.text[:200], ""
+    if code == "42703" or "column" in str(msg).lower() and "does not exist" in str(msg).lower():
+        msg = (f"kolom '{COL}' tidak ada di tabel '{TABLE}' — skema lama. "
+               "Jalankan migrasi di README: alter table yt_users rename column channel_id to user_id;")
+    elif code == "42P01" or "does not exist" in str(msg).lower():
+        msg = f"tabel '{TABLE}' belum ada — jalankan SQL di README."
+    elif r.status_code in (401, 403):
+        msg = "key ditolak — pakai service_role key di [supabase] key."
+    raise RuntimeError(f"Supabase {r.status_code}: {msg}")
+
+
 def load(user_id):
     """Ambil dict state milik user_id ({} kalau belum ada)."""
     url, key = _cfg()
@@ -84,7 +105,7 @@ def load(user_id):
     r = requests.get(f"{url}/rest/v1/{TABLE}",
                      params={COL: f"eq.{user_id}", "select": "data"},
                      headers=_headers(url, key), timeout=20)
-    r.raise_for_status()
+    _raise(r)
     rows = r.json()
     return rows[0]["data"] if rows else {}
 
@@ -100,7 +121,7 @@ def save(user_id, data):
     h = _headers(url, key, {"Prefer": "resolution=merge-duplicates"})
     r = requests.post(f"{url}/rest/v1/{TABLE}", headers=h, timeout=20,
                       json={COL: user_id, "data": data})
-    r.raise_for_status()
+    _raise(r)
 
 
 def delete(user_id):
@@ -113,7 +134,7 @@ def delete(user_id):
     r = requests.delete(f"{url}/rest/v1/{TABLE}",
                         params={COL: f"eq.{user_id}"},
                         headers=_headers(url, key), timeout=20)
-    r.raise_for_status()
+    _raise(r)
 
 
 def all_users():
@@ -127,7 +148,7 @@ def all_users():
     r = requests.get(f"{url}/rest/v1/{TABLE}",
                      params={"select": f"{COL},data"},
                      headers=_headers(url, key), timeout=20)
-    r.raise_for_status()
+    _raise(r)
     return {x[COL]: x["data"] for x in r.json()}
 
 
@@ -135,6 +156,29 @@ def _selftest():
     assert backend() in ("json", "supabase")
     ok, msg = ping()
     assert ok is None and msg == "mode json"        # tanpa [supabase] -> mode json
+
+    class R:                                          # stub respons PostgREST
+        def __init__(self, code, body):
+            self.status_code = code
+            self._b = body
+        def json(self):
+            return self._b
+        @property
+        def text(self):
+            return json.dumps(self._b)
+    # skema lama (kolom channel_id) -> pesan migrasi, bukan crash teredaksi
+    try:
+        _raise(R(400, {"code": "42703", "message": 'column "user_id" does not exist'}))
+        raise AssertionError("400 kolom hilang harus ditolak")
+    except RuntimeError as e:
+        assert "rename column channel_id" in str(e)
+    try:
+        _raise(R(404, {"code": "42P01", "message": "relation does not exist"}))
+        raise AssertionError("tabel hilang harus ditolak")
+    except RuntimeError as e:
+        assert "belum ada" in str(e)
+    _raise(R(200, {}))                                # sukses -> tidak raise
+
     uid = "_selftest_user"
     save(uid, {"role": "admin", "channels": {"UCx": {"title": "T"}}})
     assert load(uid)["role"] == "admin"

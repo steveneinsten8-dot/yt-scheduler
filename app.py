@@ -11,9 +11,13 @@ import schedule_streams as S
 from gen_schedules import build_items, parse_txt
 
 st.set_page_config(page_title="YouTube Live Scheduler", page_icon="📅", layout="wide")
-auth.ensure_admin()             # bikin akun admin dari secrets (kalau diisi)
-auth.handle_callback()          # tukar ?code=... kalau baru balik dari Google
-user = auth.current_user()
+try:
+    auth.ensure_admin()             # bikin akun admin dari secrets (kalau diisi)
+    auth.handle_callback()          # tukar ?code=... kalau baru balik dari Google
+    user = auth.current_user()
+except RuntimeError as e:           # masalah Supabase (tabel/key/skema) -> tampilkan jelas
+    st.error(f"Masalah penyimpanan (Supabase): {e}")
+    st.stop()
 
 # ---------- Gerbang login / daftar ----------
 if not user:

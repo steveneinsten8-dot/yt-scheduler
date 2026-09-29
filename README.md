@@ -43,6 +43,13 @@ alter table yt_users enable row level security;
 Tanpa Supabase, app pakai file lokal `.data/<username>.json` (buat ngoding lokal
 — **tidak** cocok untuk Streamlit Cloud karena filesystem-nya sementara).
 
+**Sudah punya tabel dari versi lama** (kolomnya `channel_id`, bukan `user_id`)?
+Jalankan sekali di SQL Editor — kalau tidak, app error `400 Bad Request`:
+```sql
+alter table yt_users rename column channel_id to user_id;
+```
+(Cek dulu: `select column_name from information_schema.columns where table_name='yt_users';`)
+
 ## 2. Secrets
 Salin `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` (lokal), atau
 tempel di Streamlit Cloud → **Settings → Secrets**. Isi:
