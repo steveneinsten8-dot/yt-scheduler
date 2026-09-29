@@ -175,7 +175,12 @@ def authenticate(username, password):
 
 
 def ensure_admin():
-    """Buat/promosikan admin dari secrets [auth] admin_user/admin_password."""
+    """Buat/promosikan admin dari secrets [auth] admin_user/admin_password.
+
+    Secrets = sumber kebenaran untuk admin: kalau password di Secrets berubah,
+    hash di penyimpanan disamakan lagi (kalau tidak, login admin 'salah terus'
+    karena baris lama tak pernah diperbarui).
+    """
     u = _secret("auth", "admin_user")
     p = _secret("auth", "admin_password")
     if not u or not p:
@@ -183,8 +188,12 @@ def ensure_admin():
     data = store.load(u)
     if not data:
         store.save(u, {"role": "admin", "pw": hash_pw(p), "channels": {}, "schedules": []})
-    elif data.get("role") != "admin":
-        data["role"] = "admin"
+        return
+    changed = data.get("role") != "admin"
+    if not verify_pw(p, data.get("pw", "")):   # password di Secrets berubah
+        data["pw"] = hash_pw(p)
+        changed = True
+    if changed:
         store.save(u, data)
 
 
@@ -406,6 +415,15 @@ def _selftest():
     # expiry aware dari data lama tak boleh bikin crash naive/aware (bug nyata)
     assert cr.expired is False
     assert cr.expiry.tzinfo is None
+    # ensure_admin: password di Secrets = sumber kebenaran (bug 'admin salah terus')
+    globals()["_secret"] = lambda *k, default=None: {"admin_user": "adm", "admin_password": "pw-lama"}.get(k[-1], default)
+    ensure_admin()
+    assert authenticate("adm", "pw-lama")
+    globals()["_secret"] = lambda *k, default=None: {"admin_user": "adm", "admin_password": "pw-baru"}.get(k[-1], default)
+    ensure_admin()                       # password Secrets berubah
+    assert authenticate("adm", "pw-baru") and not authenticate("adm", "pw-lama")
+    assert role("adm") == "admin"
+    store.delete("adm")
     print("auth selftest ok")
 
 
