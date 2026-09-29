@@ -259,6 +259,12 @@ with tab_edit:
 
 with tab_run:
     st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
+    thumb_file = st.file_uploader(
+        "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
+        "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
+    thumb_bytes = thumb_file.getvalue() if thumb_file else None
+    if thumb_bytes:
+        st.image(thumb_bytes, width=320, caption="Thumbnail akan dipakai untuk semua jadwal")
     if st.button("🔍 Dry-run (validasi tanpa kirim)"):
         bad = 0
         for it in st.session_state.schedules:
@@ -305,7 +311,7 @@ with tab_run:
                 prog.progress(n / len(items))
                 continue
             try:
-                bid = S.create(yt, it, stream_id)
+                bid = S.create(yt, it, stream_id, thumb_bytes)
             except Exception as e:
                 fail += 1
                 say(f"FAIL {it['start']} {it['title']} — {e}")

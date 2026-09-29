@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Buat jadwal live streaming YouTube dari schedules.json (YouTube Data API v3)."""
-import argparse, json, os, pickle, sys, time
+import argparse, io, json, os, pickle, sys, time
 from datetime import datetime, timezone
 
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -123,7 +124,14 @@ def add_to_playlist(yt, playlist_id, video_id):
             raise
 
 
-def create(yt, item, stream_id):
+def set_thumbnail(yt, video_id, data):
+    """Set thumbnail video dari bytes gambar (JPEG/PNG, <2 MB)."""
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype="image/jpeg", resumable=False)
+    return with_retry(lambda: yt.thumbnails().set(
+        videoId=video_id, media_body=media).execute())
+
+
+def create(yt, item, stream_id, thumbnail=None):
     body = {
         "snippet": {
             "title": item["title"],
@@ -147,6 +155,13 @@ def create(yt, item, stream_id):
     if stream_id:
         with_retry(lambda: yt.liveBroadcasts().bind(
             part="id,contentDetails", id=bc["id"], streamId=stream_id).execute())
+    # Thumbnail sama untuk semua (kalau ada). Thumbnail hanya bisa setelah video
+    # punya ID; kalau gagal (mis. channel belum terverifikasi), jangan batalkan.
+    if thumbnail:
+        try:
+            set_thumbnail(yt, bc["id"], thumbnail)
+        except HttpError as e:
+            print(f"    (thumbnail dilewati untuk {bc['id']}: {e})")
     # Tambahkan ke playlist (kalau item punya "playlist"). Cari/buat sekali.
     if item.get("playlist"):
         pid = ensure_playlist(yt, item["playlist"],
@@ -238,6 +253,7 @@ def main():
     ap.add_argument("--list-accounts", action="store_true", help="tampilkan profil akun")
     ap.add_argument("--login", action="store_true", help="login/OAuth akun ini lalu keluar")
     ap.add_argument("--stream-id", help="ID liveStream yang dipakai (default: ambil yang ada)")
+    ap.add_argument("--thumbnail", help="file gambar thumbnail untuk SEMUA jadwal (opsional)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -269,6 +285,11 @@ def main():
         stream_id = streams[0]["id"]
         print("Pakai liveStream:", stream_id)
 
+    thumb = None
+    if args.thumbnail:
+        with open(args.thumbnail, "rb") as f:
+            thumb = f.read()
+
     have = existing_keys(yt)
     ok = fail = skip = 0
     for it in items:
@@ -277,7 +298,7 @@ def main():
             print(f"SKIP  {it['start']}  {it['title']}  (sudah ada)")
             continue
         try:
-            bid = create(yt, it, stream_id)
+            bid = create(yt, it, stream_id, thumb)
         except Exception as e:
             fail += 1
             print(f"FAIL  {it['start']}  {it['title']}  -> {e}")
@@ -300,6 +321,19 @@ def _selftest():
     assert account_dir("alice") == os.path.join(ACCOUNTS, "alice")
     assert account_dir(None) == HERE and account_dir("default") == HERE
     assert token_path("alice").endswith(os.path.join("accounts", "alice", "token.pickle"))
+    # set_thumbnail: kirim bytes gambar via thumbnails().set (mock service)
+    calls = {}
+    class _Th:
+        def set(self, **kw):
+            calls.update(kw)
+            class _E:
+                def execute(self): return {"kind": "youtube#thumbnailSetResponse"}
+            return _E()
+    class _Yt:
+        def thumbnails(self): return _Th()
+    set_thumbnail(_Yt(), "VID123", b"\xff\xd8\xff\xe0fakejpg")
+    assert calls["videoId"] == "VID123"
+    assert calls["media_body"] is not None
     print("selftest ok")
 
 
