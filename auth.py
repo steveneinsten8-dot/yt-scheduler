@@ -300,7 +300,10 @@ def login_url(cfg, username):
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",   # butuh refresh_token
-        "prompt": "consent",        # paksa refresh_token terbit lagi
+        # select_account: tampilkan pemilih akun tiap kali -> satu client_secret
+        # bisa menghubungkan banyak channel dari akun Google berbeda.
+        # consent: paksa refresh_token terbit lagi.
+        "prompt": "select_account consent",
         "state": state,
     })
     return f"{AUTH_URI}?{q}"
