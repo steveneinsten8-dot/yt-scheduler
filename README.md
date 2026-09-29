@@ -27,17 +27,28 @@ alter table yt_users enable row level security;
 ```
 Isi `[supabase] url` dan `key` (pakai **service_role** atau anon + policy yang cocok).
 
-## 2. Secrets
-Salin `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` (lokal), atau
-tempel isinya di Streamlit Cloud → **Settings → Secrets**.
+## 2. OAuth: dua pilihan
+**A. Admin isi sekali (rekomendasi).** Isi `[google]` di secrets → semua pengguna
+login pakai OAuth client punyamu. Pengguna tidak perlu bikin apa pun.
+
+**B. Tiap pengguna pakai project Google sendiri.** Kosongkan `[google]`. Di
+halaman app muncul kotak **upload `client_secret.json`**. Config disimpan
+sementara per-`state`, lalu jadi milik baris channel pengguna itu (bukan app-wide,
+jadi tidak bisa dipakai orang lain untuk menimpa login).
 
 Di Google Cloud Console, buat OAuth client **Web application** dan tambahkan
 **Authorized redirect URI** = URL app persis (tanpa path), mis.
-`https://<app>.streamlit.app` dan `http://localhost:8501`.
+`https://<app>.streamlit.app` dan `http://localhost:8501`. (Redirect URI ini milik
+project yang punya `client_secret.json` — kalau pakai opsi B, tiap pengguna
+mendaftarkan URL app-mu di project mereka.)
 
-> Catatan: `redirect_uri` di sini = URL app itu sendiri (Google memantulkan
-> `?code=` ke root app). Karena itu jangan tambahkan path apa pun di daftar
-> Authorized redirect URI.
+> `redirect_uri` = URL app itu sendiri (Google memantulkan `?code=` ke root app).
+> Karena itu jangan tambahkan path apa pun di daftar Authorized redirect URI.
+
+## 2b. Secrets (selalu perlu)
+Salin `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` (lokal), atau
+tempel isinya di Streamlit Cloud → **Settings → Secrets**. Minimal butuh
+`[auth] cookie_secret` + `[supabase]`; `[google]` opsional (lihat di atas).
 
 ## 3. Deploy
 1. Push repo ke GitHub (`.gitignore` sudah menutup `secrets.toml`, `token.pickle`,

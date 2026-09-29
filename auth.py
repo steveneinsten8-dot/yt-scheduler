@@ -6,6 +6,12 @@ access_token (starlette_auth_routes.py:617) dan tidak ada st.user.refresh(),
 padahal access token YouTube mati ~1 jam. Penjadwal butuh refresh_token, jadi
 OAuth dibuat manual (web flow, redirect balik ke URL app ini).
 
+Sumber OAuth client (dua-duanya didukung):
+  1. [google] di .streamlit/secrets.toml  -> dipakai semua orang (punya kamu).
+  2. Upload client_secret.json di halaman app -> "bring your own project".
+     Config disimpan sementara per-state (baris _pending_<state>) supaya tetap
+     ada saat Google memantul balik, lalu jadi milik baris channel pengguna itu.
+
 Isolasi antar pengguna: kunci = channel_id YouTube. Cookie berisi daftar
 channel_id yang login di browser itu; datanya di store.py (Supabase).
 Orang lain login -> channel_id beda -> baris beda -> tidak saling menimpa.
@@ -43,8 +49,13 @@ def _secret(*keys, default=None):
         return default
 
 
-def configured():
-    return bool(_secret("google", "client_id") and _secret("google", "client_secret"))
+def secrets_config():
+    """Config OAuth dari secrets.toml, atau None kalau tidak ada."""
+    cid = _secret("google", "client_id")
+    csec = _secret("google", "client_secret")
+    if cid and csec:
+        return {"client_id": cid, "client_secret": csec, "source": "secrets"}
+    return None
 
 
 def redirect_uri():
@@ -85,11 +96,41 @@ def _cookie_accounts():
     return _unpack(st.context.cookies.get(COOKIE)) or []
 
 
+# ---------- client_secret.json ----------
+def parse_client_secret(raw):
+    """Bytes/str client_secret.json -> {client_id, client_secret}. Terima 'web'."""
+    try:
+        d = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except Exception as e:
+        raise ValueError(f"bukan JSON yang valid: {e}")
+    node = d.get("web") or d.get("installed") or d
+    cid, csec = node.get("client_id"), node.get("client_secret")
+    if not cid or not csec:
+        raise ValueError("tidak ada client_id/client_secret di file ini")
+    if "web" not in d:
+        raise ValueError("file ini bukan tipe 'Web application'. Buat OAuth client "
+                         "tipe 'Web application' di Google Cloud Console.")
+    return {"client_id": cid, "client_secret": csec, "source": "upload"}
+
+
 # ---------- OAuth ----------
-def login_url():
+def login_url(cfg):
+    """URL consent Google + simpan config sementara per-state (buat saat callback).
+
+    Di-cache per client_id di session supaya tiap rerun halaman login tidak
+    membuat baris _pending_ baru (state harus sama dengan yang di cookie).
+    """
+    cache_key = f"_login_{cfg['client_id']}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
     state = secrets.token_urlsafe(16)
+    # ponytail: baris _pending_ dibuang setelah login sukses; kalau pengguna
+    # membatalkan di Google, baris kecil ini tertinggal (difilter dari all_users).
+    # Tambah pembersihan berkala kalau sudah menumpuk.
+    store.save(store.PENDING + state, {"config": cfg})
+    _set_cookie(STATE_COOKIE, state, max_age=600)
     q = urlencode({
-        "client_id": _secret("google", "client_id"),
+        "client_id": cfg["client_id"],
         "redirect_uri": redirect_uri(),
         "response_type": "code",
         "scope": " ".join(SCOPES),
@@ -97,15 +138,16 @@ def login_url():
         "prompt": "consent",        # paksa refresh_token terbit lagi
         "state": state,
     })
-    _set_cookie(STATE_COOKIE, state, max_age=600)
-    return f"{AUTH_URI}?{q}"
+    url = f"{AUTH_URI}?{q}"
+    st.session_state[cache_key] = url
+    return url
 
 
-def exchange(code):
+def exchange(code, cfg):
     r = requests.post(TOKEN_URI, timeout=20, data={
         "code": code,
-        "client_id": _secret("google", "client_id"),
-        "client_secret": _secret("google", "client_secret"),
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
         "redirect_uri": redirect_uri(),
         "grant_type": "authorization_code"})
     r.raise_for_status()
@@ -113,8 +155,7 @@ def exchange(code):
     exp = datetime.now(timezone.utc) + timedelta(seconds=t.get("expires_in", 3600))
     return {"token": t["access_token"], "refresh_token": t.get("refresh_token"),
             "token_uri": TOKEN_URI,
-            "client_id": _secret("google", "client_id"),
-            "client_secret": _secret("google", "client_secret"),
+            "client_id": cfg["client_id"], "client_secret": cfg["client_secret"],
             "scopes": t.get("scope", " ".join(SCOPES)).split(),
             "expiry": exp.isoformat()}
 
@@ -146,14 +187,22 @@ def handle_callback():
     if not state or state != st.context.cookies.get(STATE_COOKIE):
         st.error("Login ditolak: state tidak cocok (CSRF). Coba lagi.")
         st.stop()
+    pend = store.load(store.PENDING + state) or {}
+    cfg = pend.get("config") or secrets_config()
+    if not cfg:
+        st.error("Sesi login kedaluwarsa (config OAuth hilang). Coba login lagi.")
+        st.stop()
     try:
-        tok = exchange(code)
+        tok = exchange(code, cfg)
         cid, title = channel_info(tok)
     except Exception as e:
         st.error(f"Login gagal: {e}")
         st.stop()
+    store.delete(store.PENDING + state)        # baris sementara tak dibutuhkan lagi
+    for k in [k for k in st.session_state if k.startswith("_login_")]:
+        del st.session_state[k]                # URL login lama tak valid lagi
     data = store.load(cid) or {}
-    data.update(token=tok, channel_title=title)
+    data.update(token=tok, channel_title=title, oauth=cfg)
     store.save(cid, data)
     accs = [a for a in _cookie_accounts() if a != cid] + [cid]
     st.session_state.accounts = accs
@@ -185,16 +234,19 @@ def logout():
     st.session_state["logged_out"] = True
     st.session_state.pop("channel_id", None)
     st.session_state["accounts"] = []
+    for k in [k for k in st.session_state if k.startswith("_login_")]:
+        del st.session_state[k]                # login berikutnya bikin state baru
     _set_cookie(COOKIE, "x", max_age=0)
 
 
 def youtube_for(channel_id):
     """(service YouTube, data) milik channel_id; refresh token bila kedaluwarsa."""
     data = store.load(channel_id)
-    if not data.get("token"):
+    tok = data.get("token")
+    if not tok:
         st.error("Sesi tidak ditemukan. Login ulang.")
         st.stop()
-    creds = creds_from_dict(data["token"])
+    creds = creds_from_dict(tok)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
         data["token"]["token"] = creds.token
@@ -207,6 +259,18 @@ def _selftest():
     assert _unpack(_pack(["UCa", "UCb"])) == ["UCa", "UCb"]
     assert _unpack("UCa.deadbeef") is None
     assert _unpack("garbage") is None
+    # parse client_secret.json
+    web = json.dumps({"web": {"client_id": "C", "client_secret": "S"}})
+    cfg = parse_client_secret(web)
+    assert cfg["client_id"] == "C" and cfg["source"] == "upload"
+    for bad in (b"not json",
+                json.dumps({"installed": {"client_id": "C", "client_secret": "S"}}),
+                json.dumps({"web": {"client_id": "C"}})):
+        try:
+            parse_client_secret(bad)
+            raise AssertionError(f"harus ditolak: {bad}")
+        except ValueError:
+            pass
     c = {"token": "t", "refresh_token": "r", "token_uri": TOKEN_URI,
          "client_id": "i", "client_secret": "s", "scopes": ["x"],
          "expiry": "2099-01-01T00:00:00+00:00"}

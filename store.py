@@ -16,6 +16,7 @@ import streamlit as st
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(HERE, ".data")
 TABLE = "yt_users"
+PENDING = "_pending_"   # baris sementara saat OAuth (kunci = state nonce)
 
 
 def _secret(*keys, default=None):
@@ -76,19 +77,35 @@ def save(channel_id, data):
     r.raise_for_status()
 
 
+def delete(channel_id):
+    """Hapus baris (dipakai buang baris sementara OAuth setelah dipakai)."""
+    url, key = _cfg()
+    if not url:
+        p = os.path.join(LOCAL, f"{channel_id}.json")
+        if os.path.exists(p):
+            os.remove(p)
+        return
+    r = requests.delete(f"{url}/rest/v1/{TABLE}",
+                        params={"channel_id": f"eq.{channel_id}"},
+                        headers=_headers(url, key), timeout=20)
+    r.raise_for_status()
+
+
 def all_users():
-    """{channel_id: data} semua pengguna — dipakai autochat (cron)."""
+    """{channel_id: data} pengguna asli (dipakai autochat). Baris sementara dilewati."""
     url, key = _cfg()
     if not url:
         if not os.path.isdir(LOCAL):
             return {}
         return {f[:-5]: json.load(open(os.path.join(LOCAL, f)))
-                for f in os.listdir(LOCAL) if f.endswith(".json")}
+                for f in os.listdir(LOCAL)
+                if f.endswith(".json") and not f.startswith(PENDING)}
     r = requests.get(f"{url}/rest/v1/{TABLE}",
                      params={"select": "channel_id,data"},
                      headers=_headers(url, key), timeout=20)
     r.raise_for_status()
-    return {x["channel_id"]: x["data"] for x in r.json()}
+    return {x["channel_id"]: x["data"] for x in r.json()
+            if not x["channel_id"].startswith(PENDING)}
 
 
 def _selftest():
@@ -96,7 +113,13 @@ def _selftest():
     save(cid, {"schedules": [{"title": "a"}], "token": {"x": 1}})
     assert load(cid)["schedules"][0]["title"] == "a"
     assert cid in all_users()
-    os.remove(os.path.join(LOCAL, f"{cid}.json"))
+    save(PENDING + "abc", {"config": {"client_id": "x"}})   # baris sementara
+    assert load(PENDING + "abc")["config"]["client_id"] == "x"
+    assert not any(k.startswith(PENDING) for k in all_users())   # tak ikut terbaca
+    delete(PENDING + "abc")
+    assert load(PENDING + "abc") == {}
+    delete(cid)
+    assert not os.path.exists(os.path.join(LOCAL, f"{cid}.json"))
     print("store selftest ok")
 
 

@@ -14,11 +14,6 @@ from gen_schedules import build_items, parse_txt
 st.set_page_config(page_title="YouTube Live Scheduler", page_icon="📅", layout="wide")
 
 # --- Gerbang login ---
-if not auth.configured():
-    st.error("Auth belum dikonfigurasi. Isi `.streamlit/secrets.toml` "
-             "(lihat `.streamlit/secrets.toml.example`).")
-    st.stop()
-
 auth.handle_callback()          # tukar ?code=... kalau baru balik dari Google
 user = auth.current_user()
 
@@ -26,7 +21,25 @@ if not user:
     st.title("📅 YouTube Live Scheduler")
     st.write("Masuk dengan akun Google yang punya channel YouTube. "
              "Tiap orang punya jadwal sendiri — tidak saling menimpa.")
-    st.link_button("🔑 Masuk dengan Google", auth.login_url(), type="primary")
+    cfg = auth.secrets_config()
+    if cfg:
+        st.link_button("🔑 Masuk dengan Google", auth.login_url(cfg), type="primary")
+    else:
+        st.warning("OAuth belum diatur admin. Upload `client_secret.json` milikmu "
+                   "untuk login.")
+    with st.expander("🔧 Pakai client_secret.json sendiri" +
+                     (" (menimpa OAuth admin)" if cfg else "")):
+        st.caption("Buat OAuth client tipe **Web application** di Google Cloud Console, "
+                   "tambahkan Authorized redirect URI = " + auth.redirect_uri())
+        up = st.file_uploader("client_secret.json", type=["json"])
+        if up:
+            try:
+                own = auth.parse_client_secret(up.getvalue())
+            except ValueError as e:
+                st.error(f"File tidak valid: {e}")
+                st.stop()
+            st.link_button("🔑 Masuk dengan Google (pakai file ini)",
+                           auth.login_url(own), type="primary")
     st.stop()
 
 yt, data = auth.youtube_for(user)
@@ -44,7 +57,11 @@ st.sidebar.caption(f"channel_id `{user}`")
 if st.sidebar.button("➕ Hubungkan akun YouTube lain"):
     st.session_state["_add"] = True
 if st.session_state.get("_add"):
-    st.sidebar.link_button("Lanjut ke Google", auth.login_url())
+    _cfg = data.get("oauth") or auth.secrets_config()
+    if _cfg:
+        st.sidebar.link_button("Lanjut ke Google", auth.login_url(_cfg))
+    else:
+        st.sidebar.warning("Config OAuth hilang, login ulang dari awal.")
 if st.sidebar.button("🚪 Keluar"):
     auth.logout()
     st.rerun()
