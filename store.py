@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(HERE, ".data")
 TABLE = "yt_users"
 COL = "user_id"
+PENDING = "_pending_"   # baris sementara saat OAuth (kunci = state nonce)
 
 
 def _secret(*keys, default=None):

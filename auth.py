@@ -33,7 +33,6 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 COOKIE = "ytuser"        # user_id yang login (signed)
-STATE_COOKIE = "ytstate"  # nonce anti-CSRF
 ITER = 200_000
 USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,32}$")
 
@@ -72,13 +71,40 @@ def _unpack(tok):
 
 
 def _set_cookie(name, value, max_age=2592000):
-    # st.markdown membuang atribut onerror (JS tidak jalan) -> cookie tak pernah
-    # tertulis. components.html mengeksekusi JS di iframe same-origin, jadi
-    # document.cookie benar-benar tersimpan dan terbaca di request berikutnya.
-    import streamlit.components.v1 as components
-    components.html(
-        f"<script>document.cookie={json.dumps(f'{name}={value};path=/;max-age={max_age};SameSite=Lax')};</script>",
-        height=0)
+    # Streamlit tak punya API set-cookie; satu-satunya jalan = jalankan JS di
+    # iframe same-origin. components.html melakukannya (st.markdown/st.html
+    # membuang <script>/onerror). Kalau ini gagal, alur OAuth tetap jalan
+    # karena identitas dibawa di parameter `state`, bukan cookie.
+    try:
+        import streamlit.components.v1 as components
+        components.html(
+            f"<script>document.cookie={json.dumps(f'{name}={value};path=/;max-age={max_age};SameSite=Lax')};</script>",
+            height=0)
+    except Exception:
+        pass
+
+
+def make_state(username):
+    """state OAuth = username + nonce, ditandatangani. Bawa identitas lewat URL
+    supaya callback tak perlu cookie/session (Streamlit bikin sesi baru saat
+    balik dari Google)."""
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"u": username, "n": secrets.token_urlsafe(8)}).encode()
+    ).decode().rstrip("=")
+    return f"{payload}.{_sig(payload)}"
+
+
+def read_state(state):
+    """username dari state yang valid, atau None kalau dipalsukan/rusak."""
+    if not state or "." not in state:
+        return None
+    payload, sig = state.rsplit(".", 1)
+    if not hmac.compare_digest(_sig(payload), sig):
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["u"]
+    except Exception:
+        return None
 
 
 def redirect_uri():
@@ -235,12 +261,12 @@ def oauth_config(username):
 
 
 def login_url(cfg, username):
-    """URL consent Google. Config disimpan di baris user (kita sudah tahu siapa dia)."""
+    """URL consent Google. Identitas user dibawa di `state` (bukan cookie), dan
+    config OAuth disimpan di baris user supaya tersedia saat callback."""
     data = store.load(username) or {}
     data["oauth"] = cfg                      # persist supaya ada saat callback
     store.save(username, data)
-    state = secrets.token_urlsafe(16)
-    _set_cookie(STATE_COOKIE, state, max_age=600)
+    state = make_state(username)
     q = urlencode({
         "client_id": cfg["client_id"],
         "redirect_uri": redirect_uri(),
@@ -285,19 +311,17 @@ def channel_info(tok):
 
 
 def handle_callback():
-    """Proses ?code=... setelah balik dari Google. Simpan channel ke baris user."""
+    """Proses ?code=... setelah balik dari Google. User diambil dari `state`
+    (bukan cookie/session), jadi tetap jalan walau sesi Streamlit baru."""
     code = st.query_params.get("code")
     if not code or st.session_state.get("_done_code") == code:
         return
     state = st.query_params.get("state")
     st.query_params.clear()
     st.session_state["_done_code"] = code
-    user = current_user()
-    if not user:
-        st.error("Sesi login app hilang. Masuk lagi, lalu hubungkan channel.")
-        st.stop()
-    if not state or state != st.context.cookies.get(STATE_COOKIE):
-        st.error("Ditolak: state tidak cocok (CSRF). Coba lagi.")
+    user = read_state(state)
+    if not user or not store.load(user):
+        st.error("Login Google tidak valid atau kedaluwarsa. Coba hubungkan lagi.")
         st.stop()
     cfg = oauth_config(user)
     if not cfg:
@@ -313,9 +337,11 @@ def handle_callback():
     data.setdefault("channels", {})[cid] = {"title": title, "token": tok}
     data["channel_id"] = cid
     store.save(user, data)
+    # pulihkan sesi login app (kalau cookie sudah ada, ini tak berdampak)
+    st.session_state["user"] = user
+    st.session_state.pop("logged_out", None)
     st.session_state["channel_id"] = cid
-    for k in [k for k in st.session_state if k.startswith("_login_")]:
-        del st.session_state[k]
+    _set_cookie(COOKIE, _pack(user))
 
 
 def youtube_for(user, channel_id):
@@ -340,6 +366,13 @@ def _selftest():
     assert _unpack("garbage") is None
     h = hash_pw("rahasia123")
     assert verify_pw("rahasia123", h) and not verify_pw("salah", h)
+    # state OAuth membawa username & tahan pemalsuan
+    s = make_state("budi")
+    assert read_state(s) == "budi"
+    assert read_state(s[:-3] + "abc") is None      # tanda tangan dirusak
+    assert read_state("garbage") is None
+    assert read_state(None) is None
+    assert read_state("x.y.z") is None
     for bad in ("ab", "a" * 33, "ada spasi", ""):
         try:
             _check(bad, "x" * 6)
