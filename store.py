@@ -53,17 +53,23 @@ def backend():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def ping():
-    """True/False kalau Supabase dikonfigurasi & bisa dijangkau; None kalau mode json."""
+    """(ok, pesan) untuk status Supabase. ok=None kalau mode json."""
     url, key = _cfg()
     if not url:
-        return None
+        return None, "mode json"
     try:
         r = requests.get(f"{url}/rest/v1/{TABLE}",
                          params={"select": COL, "limit": 1},
                          headers=_headers(url, key), timeout=10)
-        return r.status_code < 400
-    except Exception:
-        return False
+    except Exception as e:
+        return False, f"tak bisa dijangkau: {e}"
+    if r.status_code == 404 or "does not exist" in r.text:
+        return False, f"tabel '{TABLE}' belum ada — jalankan SQL di README"
+    if r.status_code in (401, 403):
+        return False, "key ditolak — pakai service_role key di [supabase] key"
+    if r.status_code >= 400:
+        return False, f"HTTP {r.status_code}: {r.text[:120]}"
+    return True, "terhubung"
 
 
 def load(user_id):
@@ -126,6 +132,9 @@ def all_users():
 
 
 def _selftest():
+    assert backend() in ("json", "supabase")
+    ok, msg = ping()
+    assert ok is None and msg == "mode json"        # tanpa [supabase] -> mode json
     uid = "_selftest_user"
     save(uid, {"role": "admin", "channels": {"UCx": {"title": "T"}}})
     assert load(uid)["role"] == "admin"

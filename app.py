@@ -60,11 +60,12 @@ st.sidebar.header(f"👤 {user}")
 st.sidebar.caption(f"role: **{role}**")
 _bk = store.backend()
 if _bk == "supabase":
-    ok = store.ping()
-    st.sidebar.caption(f"storage: **supabase** {'🟢 terhubung' if ok else '🔴 tak terjangkau'}"
-                       if ok is not None else "storage: **supabase**")
+    _ok, _msg = store.ping()
+    st.sidebar.caption(f"storage: **supabase** {'🟢' if _ok else '🔴'} {_msg}")
 else:
     st.sidebar.caption("storage: **json** (file lokal)")
+    st.sidebar.caption("⚠️ Data hilang saat app restart. Isi `[supabase]` "
+                       "di Secrets untuk simpan permanen (lihat README).")
 
 if channels:
     labels = {c: v.get("title", c) for c, v in channels.items()}
