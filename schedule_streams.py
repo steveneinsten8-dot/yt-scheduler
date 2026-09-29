@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Buat jadwal live streaming YouTube dari schedules.json (YouTube Data API v3)."""
+import argparse, json, os, pickle, sys, time
+from datetime import datetime, timezone
+
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+SCOPES = ["https://www.googleapis.com/auth/youtube"]
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOKEN = os.path.join(HERE, "token.pickle")          # token akun 'default'
+ACCOUNTS = os.path.join(HERE, "accounts")           # accounts/<nama>/{client_secret.json,token.pickle}
+
+
+def account_dir(account=None):
+    """Folder profil akun. None/'default' = folder utama (kompatibel lama)."""
+    if not account or account == "default":
+        return HERE
+    return os.path.join(ACCOUNTS, account)
+
+
+def secret_path(account=None):
+    p = os.path.join(account_dir(account), "client_secret.json")
+    return p if os.path.exists(p) else os.path.join(HERE, "client_secret.json")
+
+
+def token_path(account=None):
+    return os.path.join(account_dir(account), "token.pickle")
+
+
+def accounts():
+    """Nama profil akun yang ada (default dulu, lalu urut abjad)."""
+    names = ["default"] if os.path.exists(os.path.join(HERE, "client_secret.json")) else []
+    if os.path.isdir(ACCOUNTS):
+        names += sorted(n for n in os.listdir(ACCOUNTS)
+                        if os.path.isdir(os.path.join(ACCOUNTS, n)))
+    return names
+
+
+def save_secret(account, data):
+    """Simpan client_secret.json (bytes) ke profil akun. Return path."""
+    d = account_dir(account)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "client_secret.json")
+    with open(p, "wb") as f:
+        f.write(data)
+    return p
+
+
+def has_token(account=None):
+    return os.path.exists(token_path(account))
+
+
+def login(account=None):
+    """OAuth di browser (paksa pilih akun), simpan token ke profil akun."""
+    flow = InstalledAppFlow.from_client_secrets_file(secret_path(account), SCOPES)
+    creds = flow.run_local_server(port=0, prompt="select_account")
+    with open(token_path(account), "wb") as f:
+        pickle.dump(creds, f)
+    return creds
+
+
+def youtube(account=None):
+    creds = None
+    tp = token_path(account)
+    if os.path.exists(tp):
+        with open(tp, "rb") as f:
+            creds = pickle.load(f)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            creds = login(account)
+        with open(tp, "wb") as f:
+            pickle.dump(creds, f)
+    return build("youtube", "v3", credentials=creds)
+
+
+def whoami(yt):
+    """Nama channel dari akun yang sedang dipakai (konfirmasi akun benar)."""
+    items = yt.channels().list(part="snippet", mine=True).execute().get("items", [])
+    return items[0]["snippet"]["title"] if items else "(tidak ada channel)"
+
+
+def to_rfc3339(s):
+    """'2025-06-01 20:00' / ISO -> RFC3339 UTC. Tanpa offset dianggap waktu lokal."""
+    dt = datetime.fromisoformat(s.replace(" ", "T"))
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    dt = dt.astimezone(timezone.utc)
+    if dt <= datetime.now(timezone.utc):
+        raise ValueError(f"jadwal '{s}' sudah lewat (harus di masa depan)")
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def create(yt, item, stream_id):
+    body = {
+        "snippet": {
+            "title": item["title"],
+            "scheduledStartTime": to_rfc3339(item["start"]),
+        },
+        "status": {
+            "privacyStatus": item.get("privacy", "private"),
+            "selfDeclaredMadeForKids": False,
+        },
+        "contentDetails": {
+            "enableAutoStart": True,
+            "enableAutoStop": True,
+            "latencyPreference": "normal",
+        },
+    }
+    if item.get("description"):
+        body["snippet"]["description"] = item["description"]
+
+    bc = with_retry(lambda: yt.liveBroadcasts().insert(
+        part="snippet,status,contentDetails", body=body).execute())
+    if stream_id:
+        with_retry(lambda: yt.liveBroadcasts().bind(
+            part="id,contentDetails", id=bc["id"], streamId=stream_id).execute())
+    # Kirim komentar SEKARANG (bisa sebelum live selama broadcast sudah dibuat).
+    if item.get("comment"):
+        chat_id = bc["snippet"].get("liveChatId")
+        if not chat_id:                    # kadang belum ada di response insert
+            got = with_retry(lambda: yt.liveBroadcasts().list(
+                part="snippet", id=bc["id"]).execute())
+            items = got.get("items", [])
+            chat_id = items[0]["snippet"].get("liveChatId") if items else None
+        if chat_id:
+            post_chat(yt, chat_id, item["comment"])
+        else:
+            print(f"    (komentar dilewati: liveChatId belum tersedia untuk {bc['id']})")
+    return bc["id"]
+
+
+def with_retry(fn, attempts=6, base=5):
+    """Ulangi saat kena rate limit YouTube (403 userRequestsExceedRateLimit)."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except HttpError as e:
+            if e.resp.status != 403 or "rateLimit" not in str(e) or i == attempts - 1:
+                raise
+            wait = base * 2 ** i
+            print(f"    rate limit, tunggu {wait}s...")
+            time.sleep(wait)
+
+
+def _norm(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def post_chat(yt, live_chat_id, text):
+    """Kirim pesan ke live chat. Bisa dipakai sebelum live (broadcast 'ready')."""
+    body = {"snippet": {
+        "liveChatId": live_chat_id,
+        "type": "textMessageEvent",
+        "textMessageDetails": {"messageText": text},
+    }}
+    return with_retry(lambda: yt.liveChatMessages().insert(
+        part="snippet", body=body).execute())
+
+
+def chat_broadcasts(yt):
+    """Broadcast yang punya live chat (ready + active): [(id, title, liveChatId)]."""
+    out = []
+    for status in ("active", "upcoming"):
+        res = with_retry(lambda s=status: yt.liveBroadcasts().list(
+            part="snippet", broadcastStatus=s, maxResults=50).execute())
+        for b in res.get("items", []):
+            s = b["snippet"]
+            if s.get("liveChatId"):
+                out.append((b["id"], s["title"], s["liveChatId"]))
+    return out
+
+
+def active_broadcasts(yt):
+    """Broadcast yang sedang live: [(id, title, liveChatId), ...]."""
+    res = with_retry(lambda: yt.liveBroadcasts().list(
+        part="snippet", broadcastStatus="active", maxResults=50).execute())
+    return [(b["id"], b["snippet"]["title"], b["snippet"].get("liveChatId"))
+            for b in res.get("items", [])]
+
+
+def existing_keys(yt):
+    """Set (title, waktu UTC) broadcast yang sudah terjadwal, untuk hindari duplikat."""
+    keys = set()
+    req = yt.liveBroadcasts().list(
+        part="snippet", broadcastStatus="upcoming", maxResults=50)
+    while req:
+        res = req.execute()
+        for b in res.get("items", []):
+            s = b["snippet"]
+            if s.get("scheduledStartTime"):
+                keys.add((s["title"], _norm(s["scheduledStartTime"])))
+        req = yt.liveBroadcasts().list_next(req, res)
+    return keys
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("schedules", nargs="?", default="schedules.json")
+    ap.add_argument("--account", help="nama profil akun (default: 'default')")
+    ap.add_argument("--list-accounts", action="store_true", help="tampilkan profil akun")
+    ap.add_argument("--login", action="store_true", help="login/OAuth akun ini lalu keluar")
+    ap.add_argument("--stream-id", help="ID liveStream yang dipakai (default: ambil yang ada)")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    if args.list_accounts:
+        for n in accounts():
+            print(f"{n:20} {'✓ token' if has_token(n) else '· belum login'}")
+        return
+
+    if args.login:
+        yt = youtube(args.account)          # memicu OAuth bila belum ada token
+        print(f"Login OK sebagai: {whoami(yt)}  (profil: {args.account or 'default'})")
+        return
+
+    with open(os.path.join(HERE, args.schedules)) as f:
+        items = json.load(f)
+
+    if args.dry_run:
+        for it in items:
+            print("DRY", to_rfc3339(it["start"]), it["title"])
+        return
+
+    yt = youtube(args.account)
+    print(f"Akun: {whoami(yt)}  (profil: {args.account or 'default'})")
+    stream_id = args.stream_id
+    if not stream_id:
+        streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
+        if not streams:
+            sys.exit("Belum ada liveStream. Buat satu dulu di YouTube Studio (Stream settings).")
+        stream_id = streams[0]["id"]
+        print("Pakai liveStream:", stream_id)
+
+    have = existing_keys(yt)
+    ok = fail = skip = 0
+    for it in items:
+        if (it["title"], _norm(to_rfc3339(it["start"]))) in have:
+            skip += 1
+            print(f"SKIP  {it['start']}  {it['title']}  (sudah ada)")
+            continue
+        try:
+            bid = create(yt, it, stream_id)
+        except Exception as e:
+            fail += 1
+            print(f"FAIL  {it['start']}  {it['title']}  -> {e}")
+            continue
+        ok += 1
+        print(f"OK  {it['start']}  {it['title']}  -> https://www.youtube.com/watch?v={bid}")
+        time.sleep(1)
+    print(f"\n{ok} berhasil, {skip} dilewati (sudah ada), {fail} gagal")
+
+
+def _selftest():
+    assert to_rfc3339("2099-06-01 20:00+07:00") == "2099-06-01T13:00:00Z"
+    assert to_rfc3339("2099-06-01T20:00:00Z") == "2099-06-01T20:00:00Z"
+    try:
+        to_rfc3339("2020-01-01 00:00+07:00")
+        raise AssertionError("jadwal lewat harus ditolak")
+    except ValueError:
+        pass
+    # profil akun terpisah
+    assert account_dir("alice") == os.path.join(ACCOUNTS, "alice")
+    assert account_dir(None) == HERE and account_dir("default") == HERE
+    assert token_path("alice").endswith(os.path.join("accounts", "alice", "token.pickle"))
+    print("selftest ok")
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        _selftest()
+    else:
+        main()

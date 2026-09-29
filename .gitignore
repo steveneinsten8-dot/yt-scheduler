@@ -1,0 +1,10 @@
+client_secret.json
+token.pickle
+accounts/
+posted.json
+.venv/
+__pycache__/
+*.bak
+*.bak2
+.streamlit/secrets.toml
+.data/
