@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""UI Streamlit jadwal live YouTube. Multi-pengguna: tiap orang login Google,
-state-nya terpisah (kunci = channel_id). Jalankan: ./ui.sh atau streamlit run app.py"""
-import json
+"""UI Streamlit jadwal live YouTube. Login app (admin/user), tiap pengguna
+punya client_secret.json + channel sendiri. Jalankan: ./ui.sh"""
 from datetime import datetime
 
 import streamlit as st
@@ -12,62 +11,136 @@ import schedule_streams as S
 from gen_schedules import build_items, parse_txt
 
 st.set_page_config(page_title="YouTube Live Scheduler", page_icon="📅", layout="wide")
-
-# --- Gerbang login ---
+auth.ensure_admin()             # bikin akun admin dari secrets (kalau diisi)
 auth.handle_callback()          # tukar ?code=... kalau baru balik dari Google
 user = auth.current_user()
 
+# ---------- Gerbang login / daftar ----------
 if not user:
     st.title("📅 YouTube Live Scheduler")
-    st.write("Masuk dengan akun Google yang punya channel YouTube. "
-             "Tiap orang punya jadwal sendiri — tidak saling menimpa.")
-    cfg = auth.secrets_config()
-    if cfg:
-        st.link_button("🔑 Masuk dengan Google", auth.login_url(cfg), type="primary")
-    else:
-        st.warning("OAuth belum diatur admin. Upload `client_secret.json` milikmu "
-                   "untuk login.")
-    with st.expander("🔧 Pakai client_secret.json sendiri" +
-                     (" (menimpa OAuth admin)" if cfg else "")):
-        st.caption("Buat OAuth client tipe **Web application** di Google Cloud Console, "
-                   "tambahkan Authorized redirect URI = " + auth.redirect_uri())
-        up = st.file_uploader("client_secret.json", type=["json"])
-        if up:
-            try:
-                own = auth.parse_client_secret(up.getvalue())
-            except ValueError as e:
-                st.error(f"File tidak valid: {e}")
-                st.stop()
-            st.link_button("🔑 Masuk dengan Google (pakai file ini)",
-                           auth.login_url(own), type="primary")
+    tab_in, tab_up = st.tabs(["Masuk", "Daftar"])
+    with tab_in:
+        u = st.text_input("Username", key="in_u")
+        p = st.text_input("Password", type="password", key="in_p")
+        if st.button("Masuk", type="primary"):
+            if auth.authenticate(u, p):
+                auth.login(u)
+                st.rerun()
+            else:
+                st.error("Username atau password salah.")
+    with tab_up:
+        st.caption("Buat akun baru. Setelah masuk, upload `client_secret.json` "
+                   "milikmu untuk menghubungkan channel YouTube.")
+        nu = st.text_input("Username baru", key="up_u")
+        np1 = st.text_input("Password", type="password", key="up_p1")
+        np2 = st.text_input("Ulangi password", type="password", key="up_p2")
+        if st.button("Daftar", type="primary"):
+            if np1 != np2:
+                st.error("Password tidak sama.")
+            else:
+                try:
+                    auth.register(nu, np1)
+                    auth.login(nu)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
     st.stop()
 
-yt, data = auth.youtube_for(user)
-st.title("📅 YouTube Live Scheduler")
+role = auth.role(user)
+data = store.load(user)
+channels = data.get("channels") or {}
 
-# --- Sidebar ---
-st.sidebar.header("👤 Akun")
-accs = auth.accounts()
-labels = {c: (store.load(c).get("channel_title") or c) for c in accs}
-pick = st.sidebar.selectbox("Channel aktif", accs, format_func=lambda c: labels[c])
-if pick != st.session_state.get("channel_id"):
-    st.session_state.channel_id = pick
-    st.rerun()
-st.sidebar.caption(f"channel_id `{user}`")
-if st.sidebar.button("➕ Hubungkan akun YouTube lain"):
-    st.session_state["_add"] = True
-if st.session_state.get("_add"):
-    _cfg = data.get("oauth") or auth.secrets_config()
-    if _cfg:
-        st.sidebar.link_button("Lanjut ke Google", auth.login_url(_cfg))
+# ---------- Sidebar ----------
+st.sidebar.header(f"👤 {user}")
+st.sidebar.caption(f"role: **{role}**")
+
+if channels:
+    labels = {c: v.get("title", c) for c, v in channels.items()}
+    default = data.get("channel_id") if data.get("channel_id") in channels else list(channels)[0]
+    pick = st.sidebar.selectbox("Channel aktif", list(channels),
+                                index=list(channels).index(default),
+                                format_func=lambda c: labels[c])
+    if pick != data.get("channel_id"):
+        data["channel_id"] = pick
+        store.save(user, data)
+        st.rerun()
+else:
+    pick = None
+    st.sidebar.warning("Belum ada channel. Hubungkan di bawah.")
+
+with st.sidebar.expander("➕ Hubungkan channel YouTube", expanded=not channels):
+    st.caption("Upload `client_secret.json` tipe **Web application** "
+               "(redirect URI: " + auth.redirect_uri() + ").")
+    if auth.secrets_config():
+        st.caption("Admin sudah menyediakan OAuth — kamu bisa langsung hubungkan.")
+    up = st.file_uploader("client_secret.json (milikmu)", type=["json"])
+    cfg = None
+    if up:
+        try:
+            cfg = auth.parse_client_secret(up.getvalue())
+        except ValueError as e:
+            st.error(str(e))
+    if cfg is None:
+        cfg = auth.oauth_config(user)          # milik sendiri (tersimpan) atau admin
+    if cfg:
+        st.link_button("🔗 Lanjut ke Google", auth.login_url(cfg, user), type="primary")
     else:
-        st.sidebar.warning("Config OAuth hilang, login ulang dari awal.")
+        st.info("Upload client_secret.json dulu, atau minta admin mengisi `[google]`.")
+
 if st.sidebar.button("🚪 Keluar"):
     auth.logout()
     st.rerun()
 
-# --- State per-pengguna (bukan file lokal) ---
-if "schedules" not in st.session_state or st.session_state.get("_owner") != user:
+def _admin_panel(me):
+    st.subheader("🛠️ Kelola pengguna")
+    users = auth.all_users()
+    rows = [{"username": u, "role": d.get("role", "user"),
+             "channel": ", ".join(v.get("title", c) for c, v in (d.get("channels") or {}).items()),
+             "jadwal": len(d.get("schedules") or [])}
+            for u, d in sorted(users.items())]
+    st.dataframe(rows, width="stretch")
+
+    st.divider()
+    st.write("**Ubah role / hapus**")
+    c = st.columns([2, 2, 1])
+    target = c[0].selectbox("Pengguna", sorted(users))
+    new_role = c[1].selectbox("Role baru", ["user", "admin"])
+    if c[2].button("Simpan"):
+        auth.set_role(target, new_role)
+        st.success(f"{target} → {new_role}")
+        st.rerun()
+    if st.button(f"🗑️ Hapus akun `{target}`"):
+        if target == me:
+            st.error("Tidak bisa menghapus akun sendiri.")
+        else:
+            auth.delete_user(target)
+            st.success(f"{target} dihapus.")
+            st.rerun()
+
+    st.divider()
+    st.write("**Buat akun baru**")
+    c = st.columns(3)
+    nu = c[0].text_input("Username baru (admin)")
+    npw = c[1].text_input("Password (admin)", type="password")
+    nr = c[2].selectbox("Role baru (admin)", ["user", "admin"])
+    if st.button("Buat"):
+        try:
+            auth.register(nu, npw, nr)
+            st.success(f"Akun {nu} ({nr}) dibuat.")
+        except ValueError as e:
+            st.error(str(e))
+
+
+if not channels:
+    st.info("👈 Hubungkan channel YouTube dulu di sidebar untuk mulai membuat jadwal.")
+    if role == "admin":
+        _admin_panel(user)
+    st.stop()
+
+yt, data = auth.youtube_for(user, pick)
+
+# ---------- Jadwal (per pengguna) ----------
+if st.session_state.get("_owner") != user:
     st.session_state.schedules = data.get("schedules", [])
     st.session_state._owner = user
 
@@ -77,12 +150,14 @@ def save():
     store.save(user, data)
 
 
-tab_gen, tab_edit, tab_run, tab_chat = st.tabs(
-    ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"])
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
+if role == "admin":
+    tabs.append("🛠️ Admin")
+tab_list = st.tabs(tabs)
+tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
 
 with tab_gen:
-    mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"],
-                    horizontal=True)
+    mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"], horizontal=True)
     if mode == "Berkala (otomatis)":
         c = st.columns(4)
         count = c[0].number_input("Jumlah", 1, 200, 30)
@@ -143,7 +218,7 @@ with tab_edit:
         st.info("Belum ada jadwal. Generate dulu di tab 1.")
 
 with tab_run:
-    st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{labels.get(user, user)}`")
+    st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
     if st.button("🔍 Dry-run (validasi tanpa kirim)"):
         bad = 0
         for it in st.session_state.schedules:
@@ -228,3 +303,7 @@ with tab_chat:
                     miss += 1
                     st.write("➖", title, "(tidak ada komentar di jadwal)")
             st.success(f"{sent} terkirim · {miss} tanpa komentar")
+
+if role == "admin":
+    with tab_list[4]:
+        _admin_panel(user)

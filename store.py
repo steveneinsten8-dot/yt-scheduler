@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""State per-pengguna untuk deploy Streamlit Cloud.
+"""Penyimpanan key-value per-pengguna (Supabase, fallback file lokal).
 
-Backend: Supabase (PostgREST via requests) kalau secrets berisi [supabase],
-kalau tidak -> file lokal .data/<channel_id>.json (buat ngoding lokal).
-
-Kunci isolasi = channel_id YouTube. Dua orang login ke channel berbeda
-tidak akan saling menimpa karena tiap orang baca/tulis barisnya sendiri.
+Kunci = user_id (username app). Satu baris = satu pengguna, isinya seluruh
+state miliknya: password, role, client_secret (oauth), channel YouTube,
+jadwal. Isolasi antar pengguna otomatis karena tiap orang menulis barisnya
+sendiri — orang lain tidak bisa menimpa akunmu.
 """
 import json
 import os
@@ -16,7 +15,7 @@ import streamlit as st
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(HERE, ".data")
 TABLE = "yt_users"
-PENDING = "_pending_"   # baris sementara saat OAuth (kunci = state nonce)
+COL = "user_id"
 
 
 def _secret(*keys, default=None):
@@ -46,80 +45,72 @@ def _headers(url, key, extra=None):
     return h
 
 
-def load(channel_id):
-    """Ambil dict state milik channel_id ({} kalau belum ada)."""
+def load(user_id):
+    """Ambil dict state milik user_id ({} kalau belum ada)."""
     url, key = _cfg()
     if not url:
-        p = os.path.join(LOCAL, f"{channel_id}.json")
+        p = os.path.join(LOCAL, f"{user_id}.json")
         if os.path.exists(p):
             with open(p) as f:
                 return json.load(f)
         return {}
     r = requests.get(f"{url}/rest/v1/{TABLE}",
-                     params={"channel_id": f"eq.{channel_id}", "select": "data"},
+                     params={COL: f"eq.{user_id}", "select": "data"},
                      headers=_headers(url, key), timeout=20)
     r.raise_for_status()
     rows = r.json()
     return rows[0]["data"] if rows else {}
 
 
-def save(channel_id, data):
-    """Simpan/timpa state channel_id."""
+def save(user_id, data):
+    """Simpan/timpa state user_id."""
     url, key = _cfg()
     if not url:
         os.makedirs(LOCAL, exist_ok=True)
-        with open(os.path.join(LOCAL, f"{channel_id}.json"), "w") as f:
+        with open(os.path.join(LOCAL, f"{user_id}.json"), "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return
     h = _headers(url, key, {"Prefer": "resolution=merge-duplicates"})
     r = requests.post(f"{url}/rest/v1/{TABLE}", headers=h, timeout=20,
-                      json={"channel_id": channel_id, "data": data})
+                      json={COL: user_id, "data": data})
     r.raise_for_status()
 
 
-def delete(channel_id):
-    """Hapus baris (dipakai buang baris sementara OAuth setelah dipakai)."""
+def delete(user_id):
     url, key = _cfg()
     if not url:
-        p = os.path.join(LOCAL, f"{channel_id}.json")
+        p = os.path.join(LOCAL, f"{user_id}.json")
         if os.path.exists(p):
             os.remove(p)
         return
     r = requests.delete(f"{url}/rest/v1/{TABLE}",
-                        params={"channel_id": f"eq.{channel_id}"},
+                        params={COL: f"eq.{user_id}"},
                         headers=_headers(url, key), timeout=20)
     r.raise_for_status()
 
 
 def all_users():
-    """{channel_id: data} pengguna asli (dipakai autochat). Baris sementara dilewati."""
+    """{user_id: data} semua baris — dipakai panel admin & autochat."""
     url, key = _cfg()
     if not url:
         if not os.path.isdir(LOCAL):
             return {}
         return {f[:-5]: json.load(open(os.path.join(LOCAL, f)))
-                for f in os.listdir(LOCAL)
-                if f.endswith(".json") and not f.startswith(PENDING)}
+                for f in os.listdir(LOCAL) if f.endswith(".json")}
     r = requests.get(f"{url}/rest/v1/{TABLE}",
-                     params={"select": "channel_id,data"},
+                     params={"select": f"{COL},data"},
                      headers=_headers(url, key), timeout=20)
     r.raise_for_status()
-    return {x["channel_id"]: x["data"] for x in r.json()
-            if not x["channel_id"].startswith(PENDING)}
+    return {x[COL]: x["data"] for x in r.json()}
 
 
 def _selftest():
-    cid = "_selftest_channel"
-    save(cid, {"schedules": [{"title": "a"}], "token": {"x": 1}})
-    assert load(cid)["schedules"][0]["title"] == "a"
-    assert cid in all_users()
-    save(PENDING + "abc", {"config": {"client_id": "x"}})   # baris sementara
-    assert load(PENDING + "abc")["config"]["client_id"] == "x"
-    assert not any(k.startswith(PENDING) for k in all_users())   # tak ikut terbaca
-    delete(PENDING + "abc")
-    assert load(PENDING + "abc") == {}
-    delete(cid)
-    assert not os.path.exists(os.path.join(LOCAL, f"{cid}.json"))
+    uid = "_selftest_user"
+    save(uid, {"role": "admin", "channels": {"UCx": {"title": "T"}}})
+    assert load(uid)["role"] == "admin"
+    assert uid in all_users()
+    delete(uid)
+    assert load(uid) == {}
     print("store selftest ok")
 
 
