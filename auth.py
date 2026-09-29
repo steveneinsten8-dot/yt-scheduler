@@ -235,13 +235,31 @@ def all_users():
 
 
 def set_role(username, new_role):
+    """Ubah role. Admin tidak bisa diturunkan (kalau bisa, proteksi 'admin tak
+    bisa dihapus' jadi sia-sia: turunkan dulu, baru hapus)."""
     data = store.load(username)
-    if data:
-        data["role"] = new_role
-        store.save(username, data)
+    if not data:
+        return
+    if data.get("role") == "admin" and new_role != "admin":
+        raise ValueError("Role admin tidak bisa diturunkan.")
+    data["role"] = new_role
+    store.save(username, data)
+
+
+def set_password(username, password):
+    """Ganti password user (dipakai admin untuk reset)."""
+    data = store.load(username)
+    if not data:
+        raise ValueError("Pengguna tidak ditemukan.")
+    _check(username, password)
+    data["pw"] = hash_pw(password)
+    store.save(username, data)
 
 
 def delete_user(username):
+    """Hapus akun. Admin tidak bisa dihapus (akun admin dikelola via Secrets)."""
+    if role(username) == "admin":
+        raise ValueError("Akun admin tidak bisa dihapus.")
     store.delete(username)
 
 
@@ -423,6 +441,19 @@ def _selftest():
     ensure_admin()                       # password Secrets berubah
     assert authenticate("adm", "pw-baru") and not authenticate("adm", "pw-lama")
     assert role("adm") == "admin"
+    # admin tak bisa dihapus / diturunkan; user biasa bisa
+    for fn in (lambda: delete_user("adm"), lambda: set_role("adm", "user")):
+        try:
+            fn()
+            raise AssertionError("operasi pada admin harus ditolak")
+        except ValueError:
+            pass
+    assert store.load("adm")
+    register("budi2", "rahasia6", "user")
+    set_password("budi2", "baru123")
+    assert authenticate("budi2", "baru123")
+    delete_user("budi2")
+    assert not store.load("budi2")
     store.delete("adm")
     print("auth selftest ok")
 

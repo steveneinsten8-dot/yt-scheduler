@@ -58,6 +58,13 @@ channels = data.get("channels") or {}
 # ---------- Sidebar ----------
 st.sidebar.header(f"👤 {user}")
 st.sidebar.caption(f"role: **{role}**")
+_bk = store.backend()
+if _bk == "supabase":
+    ok = store.ping()
+    st.sidebar.caption(f"storage: **supabase** {'🟢 terhubung' if ok else '🔴 tak terjangkau'}"
+                       if ok is not None else "storage: **supabase**")
+else:
+    st.sidebar.caption("storage: **json** (file lokal)")
 
 if channels:
     labels = {c: v.get("title", c) for c, v in channels.items()}
@@ -111,16 +118,34 @@ def _admin_panel(me):
     target = c[0].selectbox("Pengguna", sorted(users))
     new_role = c[1].selectbox("Role baru", ["user", "admin"])
     if c[2].button("Simpan"):
-        auth.set_role(target, new_role)
-        st.success(f"{target} → {new_role}")
-        st.rerun()
+        try:
+            auth.set_role(target, new_role)
+            st.success(f"{target} → {new_role}")
+            st.rerun()
+        except ValueError as e:
+            st.error(str(e))
     if st.button(f"🗑️ Hapus akun `{target}`"):
         if target == me:
             st.error("Tidak bisa menghapus akun sendiri.")
         else:
-            auth.delete_user(target)
-            st.success(f"{target} dihapus.")
-            st.rerun()
+            try:
+                auth.delete_user(target)
+                st.success(f"{target} dihapus.")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+    st.divider()
+    st.write("**Reset password**")
+    c = st.columns([2, 2, 1])
+    rp_user = c[0].selectbox("Pengguna", sorted(users), key="rp_user")
+    rp_pw = c[1].text_input("Password baru", type="password", key="rp_pw")
+    if c[2].button("Reset", key="rp_btn"):
+        try:
+            auth.set_password(rp_user, rp_pw)
+            st.success(f"Password {rp_user} direset.")
+        except ValueError as e:
+            st.error(str(e))
 
     st.divider()
     st.write("**Buat akun baru**")

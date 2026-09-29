@@ -46,6 +46,26 @@ def _headers(url, key, extra=None):
     return h
 
 
+def backend():
+    """'supabase' kalau Supabase terkonfigurasi, selain itu 'json' (file lokal)."""
+    return "supabase" if _cfg()[0] else "json"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def ping():
+    """True/False kalau Supabase dikonfigurasi & bisa dijangkau; None kalau mode json."""
+    url, key = _cfg()
+    if not url:
+        return None
+    try:
+        r = requests.get(f"{url}/rest/v1/{TABLE}",
+                         params={"select": COL, "limit": 1},
+                         headers=_headers(url, key), timeout=10)
+        return r.status_code < 400
+    except Exception:
+        return False
+
+
 def load(user_id):
     """Ambil dict state milik user_id ({} kalau belum ada)."""
     url, key = _cfg()
