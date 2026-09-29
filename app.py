@@ -202,11 +202,13 @@ with tab_gen:
         title = st.text_input("Pola judul ({i} = nomor)", "Live Harian #{i}")
         comment = st.text_input("Komentar live chat otomatis ({i} = nomor, kosongkan = tidak ada)",
                                 "Halo! Selamat datang di Live Harian #{i} 🙌")
+        playlist = st.text_input("Playlist ({i} = nomor, {title} = judul; kosongkan = tanpa playlist)",
+                                 "")
         privacy = st.selectbox("Privasi", ["public", "unlisted", "private"])
         if st.button("Generate", type="primary"):
             st.session_state.schedules = build_items(
                 int(count), start.isoformat(), time_.strftime("%H:%M"),
-                int(step), title, privacy, comment)
+                int(step), title, privacy, comment, playlist)
             save()
             st.success(f"{len(st.session_state.schedules)} jadwal dibuat.")
     else:
@@ -235,6 +237,8 @@ Archangels @ Bears
 
 with tab_edit:
     if st.session_state.schedules:
+        for _it in st.session_state.schedules:      # kolom Playlist selalu tampil
+            _it.setdefault("playlist", "")
         edited = st.data_editor(
             st.session_state.schedules, num_rows="dynamic", width="stretch",
             column_config={
@@ -244,6 +248,7 @@ with tab_edit:
                     "Privasi", options=["public", "unlisted", "private"]),
                 "description": st.column_config.TextColumn("Deskripsi"),
                 "comment": st.column_config.TextColumn("Komentar live chat"),
+                "playlist": st.column_config.TextColumn("Playlist"),
             })
         if st.button("Simpan perubahan"):
             st.session_state.schedules = edited

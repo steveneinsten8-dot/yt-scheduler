@@ -95,6 +95,34 @@ def to_rfc3339(s):
     return dt.isoformat().replace("+00:00", "Z")
 
 
+def ensure_playlist(yt, title, privacy="public"):
+    """Cari playlist milik channel ini dengan judul sama; buat kalau belum ada.
+    Mengembalikan playlistId."""
+    req = yt.playlists().list(part="snippet", mine=True, maxResults=50)
+    while req:
+        res = req.execute()
+        for p in res.get("items", []):
+            if p["snippet"]["title"] == title:
+                return p["id"]
+        req = yt.playlists().list_next(req, res)
+    body = {"snippet": {"title": title},
+            "status": {"privacyStatus": privacy}}
+    return with_retry(lambda: yt.playlists().insert(
+        part="snippet,status", body=body).execute())["id"]
+
+
+def add_to_playlist(yt, playlist_id, video_id):
+    """Tambahkan video ke playlist (idempotent: abaikan kalau sudah ada)."""
+    try:
+        with_retry(lambda: yt.playlistItems().insert(part="snippet", body={
+            "snippet": {"playlistId": playlist_id,
+                        "resourceId": {"kind": "youtube#video", "videoId": video_id}}
+        }).execute())
+    except HttpError as e:
+        if e.resp.status != 409:      # 409 = sudah ada di playlist
+            raise
+
+
 def create(yt, item, stream_id):
     body = {
         "snippet": {
@@ -119,6 +147,11 @@ def create(yt, item, stream_id):
     if stream_id:
         with_retry(lambda: yt.liveBroadcasts().bind(
             part="id,contentDetails", id=bc["id"], streamId=stream_id).execute())
+    # Tambahkan ke playlist (kalau item punya "playlist"). Cari/buat sekali.
+    if item.get("playlist"):
+        pid = ensure_playlist(yt, item["playlist"],
+                              "private" if item.get("privacy") == "private" else "public")
+        add_to_playlist(yt, pid, bc["id"])
     # Kirim komentar SEKARANG (bisa sebelum live selama broadcast sudah dibuat).
     if item.get("comment"):
         chat_id = bc["snippet"].get("liveChatId")

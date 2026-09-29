@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 
 
 def build_items(count=30, start=None, time="20:00", step=1,
-                title="Live Harian #{i}", privacy="public", comment=""):
+                title="Live Harian #{i}", privacy="public", comment="",
+                playlist=""):
     day0 = (datetime.fromisoformat(start) if start
             else datetime.now() + timedelta(days=1))
     day0 = day0.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -24,6 +25,8 @@ def build_items(count=30, start=None, time="20:00", step=1,
         }
         if comment:
             it["comment"] = comment.format(i=i + 1)
+        if playlist:
+            it["playlist"] = playlist.format(i=i + 1, title=it["title"])
         items.append(it)
     return items
 
@@ -48,10 +51,12 @@ def parse_txt(text, lead_min=10, gap_min=30, privacy="public"):
         if not lines:
             continue
         title = " — ".join(lines[:2]) if len(lines) >= 2 else lines[0]
-        comment, desc = "", []
+        comment, desc, playlist = "", [], ""
         for l in lines[2:]:
             if l.startswith("📺"):
                 comment = l[len("📺"):].strip()
+            elif l.startswith("📁"):
+                playlist = l[len("📁"):].strip()
             else:
                 desc.append(l)
         t = now + timedelta(minutes=lead_min + gap_min * i)
@@ -60,6 +65,8 @@ def parse_txt(text, lead_min=10, gap_min=30, privacy="public"):
             it["description"] = "\n".join(desc)
         if comment:
             it["comment"] = comment
+        if playlist:
+            it["playlist"] = playlist
         items.append(it)
     return items
 
@@ -94,6 +101,11 @@ def _selftest():
     assert [i["start"] for i in items] == [
         "2026-01-01 20:00", "2026-01-03 20:00", "2026-01-05 20:00"]
     assert [i["title"] for i in items] == ["X #1", "X #2", "X #3"]
+
+    # playlist: pola {i}/{title} diisi per item
+    pl = build_items(2, "2026-01-01", "20:00", 1, "X #{i}", playlist="Liga {i}")
+    assert pl[0]["playlist"] == "Liga 1" and pl[1]["playlist"] == "Liga 2"
+    assert "playlist" not in build_items(1, "2026-01-01")[0]
 
     txt = """Alaska High School Football
 SWDP Private School vs Kodiak
