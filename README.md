@@ -29,6 +29,13 @@ client **Web application** di Google Cloud Console, tambahkan **Authorized
 redirect URI** = URL app persis (mis. `https://<app>.streamlit.app`,
 `http://localhost:8501`).
 
+**Menghubungkan akun Google lain → `Error 403: access_denied`?** Selama project
+OAuth masih status **Testing**, hanya akun yang terdaftar sebagai **Test user**
+yang boleh masuk. Setiap akun Google baru harus didaftarkan dulu:
+Google Cloud Console → **APIs & Services → OAuth consent screen → Test users →
+Add users** → masukkan email Google-nya → Save. (Kalau mau siapa pun bisa tanpa
+daftar, ajukan **Publish app** → butuh verifikasi Google untuk scope YouTube.)
+
 ## 1. Supabase (untuk multi-pengguna online)
 SQL Editor → jalankan:
 ```sql
