@@ -72,9 +72,13 @@ def _unpack(tok):
 
 
 def _set_cookie(name, value, max_age=2592000):
-    js = f"document.cookie='{name}={value};path=/;max-age={max_age};SameSite=Lax'"
-    st.markdown(f'<img src=x onerror="{js}" style="display:none">',
-                unsafe_allow_html=True)
+    # st.markdown membuang atribut onerror (JS tidak jalan) -> cookie tak pernah
+    # tertulis. components.html mengeksekusi JS di iframe same-origin, jadi
+    # document.cookie benar-benar tersimpan dan terbaca di request berikutnya.
+    import streamlit.components.v1 as components
+    components.html(
+        f"<script>document.cookie={json.dumps(f'{name}={value};path=/;max-age={max_age};SameSite=Lax')};</script>",
+        height=0)
 
 
 def redirect_uri():
