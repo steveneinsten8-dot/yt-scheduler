@@ -78,8 +78,21 @@ def _set_cookie(name, value, max_age=2592000):
 
 
 def redirect_uri():
-    """URL app ini = tempat Google memantulkan ?code=... . Otomatis dari host."""
-    return (st.context.url or "").split("?")[0].rstrip("/") or "http://localhost:8501"
+    """URL app ini = tempat Google memantulkan ?code=... .
+
+    Bisa dipin lewat [google] redirect_uri di secrets (paling aman, nilainya
+    tidak berubah). Kalau tidak dipin, dihitung dari URL yang diakses. Harus
+    didaftarkan PERSIS sama di Google Console -> Authorized redirect URIs.
+    """
+    pinned = _secret("google", "redirect_uri") or _secret("redirect_uri")
+    if pinned:
+        return str(pinned).rstrip("/")
+    url = (st.context.url or "").split("?")[0].rstrip("/")
+    if not url:
+        return "http://localhost:8501"
+    if url.startswith("http://") and "localhost" not in url and "127.0.0.1" not in url:
+        url = "https://" + url[len("http://"):]      # di belakang proxy selalu https
+    return url
 
 
 def secrets_config():

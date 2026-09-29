@@ -44,6 +44,11 @@ if not user:
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))
+    with st.expander("ℹ️ Setup OAuth (buat admin)"):
+        st.caption("Daftarkan **Authorized redirect URI** ini PERSIS (tanpa `/` "
+                   "di akhir) di Google Cloud Console → Credentials → OAuth client "
+                   "Web application. Kalau salah sedikit → `redirect_uri_mismatch`.")
+        st.code(auth.redirect_uri(), language="text")
     st.stop()
 
 role = auth.role(user)
