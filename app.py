@@ -259,71 +259,66 @@ with tab_edit:
 
 with tab_run:
     st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
+    thumb_file = st.file_uploader(
+        "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
+        "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
+    thumb_bytes = thumb_file.getvalue() if thumb_file else None
+    if thumb_bytes:
+        st.image(thumb_bytes, width=320, caption="Thumbnail akan dipakai untuk semua jadwal")
+    if st.button("🔍 Dry-run (validasi tanpa kirim)"):
+        bad = 0
+        for it in st.session_state.schedules:
+            try:
+                st.write("✅", S.to_rfc3339(it["start"]), it["title"])
+            except Exception as e:
+                bad += 1
+                st.write("❌", it.get("start"), it.get("title"), "—", e)
+        if bad:
+            st.warning(f"{bad} jadwal bermasalah")
     if role != "admin":
-        st.info("Pembuatan jadwal di YouTube dikelola admin. Kamu tetap bisa melihat validasi jadwal dan mengirim komentar dari tab Live Chat.")
-    else:
-        thumb_file = st.file_uploader(
-            "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
-            "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
-        thumb_bytes = thumb_file.getvalue() if thumb_file else None
-        if thumb_bytes:
-            st.image(thumb_bytes, width=320, caption="Thumbnail akan dipakai untuk semua jadwal")
-        if st.button("🔍 Dry-run (validasi tanpa kirim)"):
-            bad = 0
-            for it in st.session_state.schedules:
-                try:
-                    st.write("✅", S.to_rfc3339(it["start"]), it["title"])
-                except Exception as e:
-                    bad += 1
-                    st.write("❌", it.get("start"), it.get("title"), "—", e)
-            st.warning(f"{bad} jadwal bermasalah") if bad else st.success("Semua valid.")
-
-        if st.button("🚀 Buat di YouTube", type="primary"):
-            items = st.session_state.schedules
-            if not items:
-                st.error("Tidak ada jadwal.")
-                st.stop()
-            log = st.empty()
-            lines = []
-
-            def say(s):
-                lines.append(s)
-                log.code("\n".join(lines[-20:]))
-
-            streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
-            if not streams:
-                st.error("Belum ada liveStream. Buat dulu di YouTube Studio.")
-                st.stop()
-            stream_id = streams[0]["id"]
-            say(f"liveStream: {stream_id}")
-
-            have = S.existing_keys(yt)
-            ok = fail = skip = 0
-            prog = st.progress(0.0)
-            for n, it in enumerate(items, 1):
-                try:
-                    key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
-                except Exception as e:
-                    fail += 1
-                    say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
-                    prog.progress(n / len(items))
-                    continue
-                if key in have:
-                    skip += 1
-                    say(f"SKIP {it['start']} {it['title']} (sudah ada)")
-                    prog.progress(n / len(items))
-                    continue
-                try:
-                    bid = S.create(yt, it, stream_id, thumb_bytes)
-                except Exception as e:
-                    fail += 1
-                    say(f"FAIL {it['start']} {it['title']} — {e}")
-                else:
-                    ok += 1
-                    say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
+        st.info("Upload stream tersedia. Pembuatan broadcast dilakukan admin.")
+    if role == "admin" and st.button("🚀 Buat di YouTube", type="primary"):
+        items = st.session_state.schedules
+        if not items:
+            st.error("Tidak ada jadwal.")
+            st.stop()
+        log = st.empty()
+        lines = []
+        def say(s):
+            lines.append(s)
+            log.code("\n".join(lines[-20:]))
+        streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
+        if not streams:
+            st.error("Belum ada liveStream. Buat dulu di YouTube Studio.")
+            st.stop()
+        stream_id = streams[0]["id"]
+        say(f"liveStream: {stream_id}")
+        have = S.existing_keys(yt)
+        ok = fail = skip = 0
+        prog = st.progress(0.0)
+        for n, it in enumerate(items, 1):
+            try:
+                key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
+            except Exception as e:
+                fail += 1
+                say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
                 prog.progress(n / len(items))
-
-            st.success(f"{ok} berhasil · {skip} dilewati · {fail} gagal")
+                continue
+            if key in have:
+                skip += 1
+                say(f"SKIP {it['start']} {it['title']} (sudah ada)")
+                prog.progress(n / len(items))
+                continue
+            try:
+                bid = S.create(yt, it, stream_id, thumb_bytes)
+            except Exception as e:
+                fail += 1
+                say(f"FAIL {it['start']} {it['title']} — {e}")
+            else:
+                ok += 1
+                say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
+            prog.progress(n / len(items))
+        st.success(f"{ok} berhasil · {skip} dilewati · {fail} gagal")
 
 with tab_chat:
     st.info("Komentar dikirim otomatis **saat broadcast dibuat** (bisa sebelum live). "
