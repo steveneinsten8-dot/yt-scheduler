@@ -275,9 +275,7 @@ with tab_run:
                 st.write("❌", it.get("start"), it.get("title"), "—", e)
         if bad:
             st.warning(f"{bad} jadwal bermasalah")
-    if role != "admin":
-        st.info("Upload stream tersedia. Pembuatan broadcast dilakukan admin.")
-    if role == "admin" and st.button("🚀 Buat di YouTube", type="primary"):
+    if st.button("🚀 Buat di YouTube", type="primary"):
         items = st.session_state.schedules
         if not items:
             st.error("Tidak ada jadwal.")
@@ -332,21 +330,23 @@ with tab_chat:
     if not live:
         st.warning("Tidak ada broadcast dengan live chat.")
     else:
-        labels = {bid: title for bid, title, chat_id in live}
-        selected = st.selectbox("Pilih broadcast", list(labels), format_func=lambda b: labels[b])
-        selected_chat = next(chat_id for bid, title, chat_id in live if bid == selected)
-        manual = st.text_area("Komentar", placeholder="Tulis komentar live chat...")
-        if st.button("💬 Kirim komentar", type="primary"):
+        st.caption(f"Komentar akan dikirim ke semua broadcast upcoming/active di channel `{pick}`.")
+        manual = st.text_area("Komentar untuk semua broadcast", placeholder="Tulis komentar live chat...")
+        if st.button("💬 Kirim ke semua broadcast", type="primary"):
             if not manual.strip():
                 st.error("Komentar masih kosong.")
-            elif not selected_chat:
-                st.error("Live chat belum tersedia untuk broadcast ini.")
             else:
-                S.post_chat(yt, selected_chat, manual.strip())
-                st.success(f"Komentar terkirim ke: {labels[selected]}")
+                sent = miss = 0
+                for bid, title, chat_id in live:
+                    if chat_id:
+                        S.post_chat(yt, chat_id, manual.strip())
+                        sent += 1
+                    else:
+                        miss += 1
+                st.success(f"{sent} broadcast menerima komentar · {miss} belum punya live chat")
         st.divider()
-        st.caption("Komentar dari jadwal (opsional)")
-        if st.button("Kirim komentar jadwal"):
+        st.caption("Komentar dari jadwal (otomatis ke broadcast yang judulnya cocok)")
+        if st.button("Kirim komentar jadwal ke semua"):
             comments = {it["title"]: it["comment"] for it in st.session_state.schedules if it.get("comment")}
             sent = miss = 0
             for bid, title, chat_id in live:
