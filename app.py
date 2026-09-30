@@ -185,24 +185,11 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek"]
-if role == "admin":
-    tabs.append("3️⃣ Buat di YouTube")
-tabs.append("3️⃣ Live Chat" if role != "admin" else "4️⃣ Live Chat")
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit = tab_list[:2]
-if role == "admin":
-    tab_run, tab_chat = tab_list[2:4]
-else:
-    tab_run = None
-    tab_chat = tab_list[2] 
-
-def _admin_only_tab():
-    if role != "admin":
-        return
-    return tab_run
+tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
 
 with tab_gen:
     mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"], horizontal=True)
@@ -270,9 +257,11 @@ with tab_edit:
     else:
         st.info("Belum ada jadwal. Generate dulu di tab 1.")
 
-if role == "admin":
-    with tab_run:
-        st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
+with tab_run:
+    st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
+    if role != "admin":
+        st.info("Pembuatan jadwal di YouTube dikelola admin. Kamu tetap bisa melihat validasi jadwal dan mengirim komentar dari tab Live Chat.")
+    else:
         thumb_file = st.file_uploader(
             "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
             "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
