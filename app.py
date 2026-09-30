@@ -185,11 +185,24 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek"]
+if role == "admin":
+    tabs.append("3️⃣ Buat di YouTube")
+tabs.append("3️⃣ Live Chat" if role != "admin" else "4️⃣ Live Chat")
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
+tab_gen, tab_edit = tab_list[:2]
+if role == "admin":
+    tab_run, tab_chat = tab_list[2:4]
+else:
+    tab_run = None
+    tab_chat = tab_list[2] 
+
+def _admin_only_tab():
+    if role != "admin":
+        return
+    return tab_run
 
 with tab_gen:
     mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"], horizontal=True)
@@ -257,70 +270,71 @@ with tab_edit:
     else:
         st.info("Belum ada jadwal. Generate dulu di tab 1.")
 
-with tab_run:
-    st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
-    thumb_file = st.file_uploader(
-        "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
-        "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
-    thumb_bytes = thumb_file.getvalue() if thumb_file else None
-    if thumb_bytes:
-        st.image(thumb_bytes, width=320, caption="Thumbnail akan dipakai untuk semua jadwal")
-    if st.button("🔍 Dry-run (validasi tanpa kirim)"):
-        bad = 0
-        for it in st.session_state.schedules:
-            try:
-                st.write("✅", S.to_rfc3339(it["start"]), it["title"])
-            except Exception as e:
-                bad += 1
-                st.write("❌", it.get("start"), it.get("title"), "—", e)
-        st.warning(f"{bad} jadwal bermasalah") if bad else st.success("Semua valid.")
+if role == "admin":
+    with tab_run:
+        st.caption(f"Total {len(st.session_state.schedules)} jadwal · channel `{pick}`")
+        thumb_file = st.file_uploader(
+            "Thumbnail (opsional, satu gambar untuk SEMUA jadwal di batch ini) "
+            "— JPEG/PNG, maks 2 MB", type=["jpg", "jpeg", "png"], key="thumb")
+        thumb_bytes = thumb_file.getvalue() if thumb_file else None
+        if thumb_bytes:
+            st.image(thumb_bytes, width=320, caption="Thumbnail akan dipakai untuk semua jadwal")
+        if st.button("🔍 Dry-run (validasi tanpa kirim)"):
+            bad = 0
+            for it in st.session_state.schedules:
+                try:
+                    st.write("✅", S.to_rfc3339(it["start"]), it["title"])
+                except Exception as e:
+                    bad += 1
+                    st.write("❌", it.get("start"), it.get("title"), "—", e)
+            st.warning(f"{bad} jadwal bermasalah") if bad else st.success("Semua valid.")
 
-    if st.button("🚀 Buat di YouTube", type="primary"):
-        items = st.session_state.schedules
-        if not items:
-            st.error("Tidak ada jadwal.")
-            st.stop()
-        log = st.empty()
-        lines = []
+        if st.button("🚀 Buat di YouTube", type="primary"):
+            items = st.session_state.schedules
+            if not items:
+                st.error("Tidak ada jadwal.")
+                st.stop()
+            log = st.empty()
+            lines = []
 
-        def say(s):
-            lines.append(s)
-            log.code("\n".join(lines[-20:]))
+            def say(s):
+                lines.append(s)
+                log.code("\n".join(lines[-20:]))
 
-        streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
-        if not streams:
-            st.error("Belum ada liveStream. Buat dulu di YouTube Studio.")
-            st.stop()
-        stream_id = streams[0]["id"]
-        say(f"liveStream: {stream_id}")
+            streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
+            if not streams:
+                st.error("Belum ada liveStream. Buat dulu di YouTube Studio.")
+                st.stop()
+            stream_id = streams[0]["id"]
+            say(f"liveStream: {stream_id}")
 
-        have = S.existing_keys(yt)
-        ok = fail = skip = 0
-        prog = st.progress(0.0)
-        for n, it in enumerate(items, 1):
-            try:
-                key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
-            except Exception as e:
-                fail += 1
-                say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
+            have = S.existing_keys(yt)
+            ok = fail = skip = 0
+            prog = st.progress(0.0)
+            for n, it in enumerate(items, 1):
+                try:
+                    key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
+                except Exception as e:
+                    fail += 1
+                    say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
+                    prog.progress(n / len(items))
+                    continue
+                if key in have:
+                    skip += 1
+                    say(f"SKIP {it['start']} {it['title']} (sudah ada)")
+                    prog.progress(n / len(items))
+                    continue
+                try:
+                    bid = S.create(yt, it, stream_id, thumb_bytes)
+                except Exception as e:
+                    fail += 1
+                    say(f"FAIL {it['start']} {it['title']} — {e}")
+                else:
+                    ok += 1
+                    say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
                 prog.progress(n / len(items))
-                continue
-            if key in have:
-                skip += 1
-                say(f"SKIP {it['start']} {it['title']} (sudah ada)")
-                prog.progress(n / len(items))
-                continue
-            try:
-                bid = S.create(yt, it, stream_id, thumb_bytes)
-            except Exception as e:
-                fail += 1
-                say(f"FAIL {it['start']} {it['title']} — {e}")
-            else:
-                ok += 1
-                say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
-            prog.progress(n / len(items))
 
-        st.success(f"{ok} berhasil · {skip} dilewati · {fail} gagal")
+            st.success(f"{ok} berhasil · {skip} dilewati · {fail} gagal")
 
 with tab_chat:
     st.info("Komentar dikirim otomatis **saat broadcast dibuat** (bisa sebelum live). "
@@ -334,20 +348,29 @@ with tab_chat:
     if not live:
         st.warning("Tidak ada broadcast dengan live chat.")
     else:
-        for bid, title, chat_id in live:
-            st.write(f"🔴 **{title}** — `{bid}`")
-        if st.button("💬 Kirim komentar sekarang", type="primary"):
-            comments = {it["title"]: it["comment"]
-                        for it in st.session_state.schedules if it.get("comment")}
+        labels = {bid: title for bid, title, chat_id in live}
+        selected = st.selectbox("Pilih broadcast", list(labels), format_func=lambda b: labels[b])
+        selected_chat = next(chat_id for bid, title, chat_id in live if bid == selected)
+        manual = st.text_area("Komentar", placeholder="Tulis komentar live chat...")
+        if st.button("💬 Kirim komentar", type="primary"):
+            if not manual.strip():
+                st.error("Komentar masih kosong.")
+            elif not selected_chat:
+                st.error("Live chat belum tersedia untuk broadcast ini.")
+            else:
+                S.post_chat(yt, selected_chat, manual.strip())
+                st.success(f"Komentar terkirim ke: {labels[selected]}")
+        st.divider()
+        st.caption("Komentar dari jadwal (opsional)")
+        if st.button("Kirim komentar jadwal"):
+            comments = {it["title"]: it["comment"] for it in st.session_state.schedules if it.get("comment")}
             sent = miss = 0
             for bid, title, chat_id in live:
                 if title in comments and chat_id:
                     S.post_chat(yt, chat_id, comments[title])
-                    st.write("✅", title, "→", comments[title])
                     sent += 1
                 else:
                     miss += 1
-                    st.write("➖", title, "(tidak ada komentar di jadwal)")
             st.success(f"{sent} terkirim · {miss} tanpa komentar")
 
 if role == "admin":
