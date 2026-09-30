@@ -244,12 +244,7 @@ def _template_description(item):
     date = next((x.strip() for x in desc.splitlines()
                  if re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+\w+\s+\d+", x, re.I)), "")
     tags = " ".join(x for x in desc.split() if x.startswith("#"))
-    watch = item.get("comment", "")
-    if watch.lower().startswith("watch live:"):
-        watch = watch[len("watch live:"):].strip()
-    return f"""📺 Watch LIVE : {watch}
-
-🏆 High School Football Live Streaming – Watch the Game Live! 🏈🎥
+    return f"""🏆 High School Football Live Streaming – Watch the Game Live! 🏈🎥
 Welcome to our High School Football Live Streaming! Get ready for an action-packed game as talented young athletes take the field to showcase their skills, teamwork, and passion for football. Watch the excitement of High School Football live from the field! Catch every touchdown, tackle, and unforgettable play as local teams battle it out under the Friday night lights. Don’t miss the energy, passion, and community spirit that make high school football special. Stream the game live and cheer for your favorite team from anywhere!
 
 📅 Match Details:
