@@ -2,6 +2,7 @@
 """UI Streamlit jadwal live YouTube. Login app (admin/user), tiap pengguna
 punya client_secret.json + channel sendiri. Jalankan: ./ui.sh"""
 from datetime import datetime
+import re
 
 import streamlit as st
 
@@ -235,8 +236,52 @@ Archangels @ Bears
 
 #Alaska #AKHSFootball""", language="text")
 
+def _template_description(item):
+    title = item.get("title", "")
+    parts = [x.strip() for x in title.split(" — ", 1)]
+    teams = parts[0]
+    desc = item.get("description", "")
+    date = next((x.strip() for x in desc.splitlines()
+                 if re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+\w+\s+\d+", x, re.I)), "")
+    tags = " ".join(x for x in desc.split() if x.startswith("#"))
+    watch = item.get("comment", "")
+    if watch.lower().startswith("watch live:"):
+        watch = watch[len("watch live:"):].strip()
+    return f"""📺 Watch LIVE : {watch}
+
+🏆 High School Football Live Streaming – Watch the Game Live! 🏈🎥
+Welcome to our High School Football Live Streaming! Get ready for an action-packed game as talented young athletes take the field to showcase their skills, teamwork, and passion for football. Watch the excitement of High School Football live from the field! Catch every touchdown, tackle, and unforgettable play as local teams battle it out under the Friday night lights. Don’t miss the energy, passion, and community spirit that make high school football special. Stream the game live and cheer for your favorite team from anywhere!
+
+📅 Match Details:
+🆚 Teams : {teams}
+📅 Date : {date}
+
+🔥 Why You Should Watch:
+✅ Live Play-by-Play Coverage – Follow every play in real time.
+✅ Expert Commentary & Analysis – Stay informed with insights from our commentators.
+✅ High-Quality Streaming – Enjoy a clear and smooth viewing experience.
+✅ Exciting Highlights & Key Moments – Catch the best plays and game-changing moments.
+✅ Interactive Fan Experience – Join the conversation in live chat and cheer for your team!
+
+📢 Support Your Team!
+Show your school spirit by leaving a comment, hitting the like button, and sharing this live stream with friends and family.
+
+🔔 Subscribe & Stay Updated!
+Don’t miss future games. Subscribe and turn on notifications for upcoming live streams and highlights.
+
+Thank you for watching, and enjoy the game!🏈🔥
+
+{tags}""".strip()
+
+
 with tab_edit:
     if st.session_state.schedules:
+        template = st.selectbox("Template deskripsi", ["Tidak ada", "High School Football Live Streaming"])
+        if st.button("Tambah template ke semua jadwal") and template != "Tidak ada":
+            for _it in st.session_state.schedules:
+                _it["description"] = _template_description(_it)
+            save()
+            st.success("Template deskripsi ditambahkan ke semua jadwal.")
         for _it in st.session_state.schedules:      # kolom Playlist selalu tampil
             _it.setdefault("playlist", "")
         edited = st.data_editor(
