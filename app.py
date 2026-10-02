@@ -197,45 +197,25 @@ tab_list = st.tabs(tabs)
 tab_gen, tab_edit, tab_run, tab_chat, tab_banner = tab_list[:5]
 
 with tab_gen:
-    mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"], horizontal=True)
-    if mode == "Berkala (otomatis)":
-        c = st.columns(4)
-        count = c[0].number_input("Jumlah", 1, 200, 30)
-        start = c[1].date_input("Mulai", value=datetime.now().date())
-        time_ = c[2].time_input("Jam", value=datetime.strptime("20:00", "%H:%M").time())
-        step = c[3].number_input("Jarak (hari)", 1, 30, 1)
-        title = st.text_input("Pola judul ({i} = nomor)", "Live Harian #{i}")
-        comment = st.text_input("Komentar live chat otomatis ({i} = nomor, kosongkan = tidak ada)",
-                                "Halo! Selamat datang di Live Harian #{i} 🙌")
-        playlist = st.text_input("Playlist ({i} = nomor, {title} = judul; kosongkan = tanpa playlist)",
-                                 "")
-        privacy = st.selectbox("Privasi", ["public", "unlisted", "private"])
-        if st.button("Generate", type="primary"):
-            st.session_state.schedules = build_items(
-                int(count), start.isoformat(), time_.strftime("%H:%M"),
-                int(step), title, privacy, comment, playlist)
-            save()
-            st.success(f"{len(st.session_state.schedules)} jadwal dibuat.")
-    else:
-        st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "
-                   "Baris 1+2 → judul (digabung). Baris 📺 → komentar live chat. "
-                   "Baris lain → deskripsi. Baris `#hashtag` menempel ke jadwal sebelumnya. "
-                   "Waktu otomatis: sekarang + lead, tiap entri +gap.")
-        up = st.file_uploader("File TXT", type=["txt"])
-        c = st.columns(2)
-        lead = c[0].number_input("Lead (menit dari sekarang)", 1, 1440, 10)
-        gap = c[1].number_input("Jarak antar entri (menit)", 1, 1440, 30)
-        privacy2 = st.selectbox("Privasi (TXT)", ["public", "unlisted", "private"], key="p2")
-        if up and st.button("Import", type="primary"):
-            st.session_state.schedules = parse_txt(
-                up.read().decode("utf-8"), int(lead), int(gap), privacy2)
-            save()
-            st.success(f"{len(st.session_state.schedules)} jadwal diimpor dari TXT.")
-        with st.expander("Contoh format TXT"):
-            st.code("""Alaska High School Football
+    st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "
+               "Baris 1+2 → judul (digabung). Baris 📺 → komentar live chat. "
+               "Baris lain → deskripsi. Baris `#hashtag` menempel ke jadwal sebelumnya. "
+               "Waktu otomatis: sekarang + lead, tiap entri +gap.")
+    up = st.file_uploader("File TXT", type=["txt"])
+    c = st.columns(2)
+    lead = c[0].number_input("Lead (menit dari sekarang)", 1, 1440, 10)
+    gap = c[1].number_input("Jarak antar entri (menit)", 1, 1440, 30)
+    privacy2 = st.selectbox("Privasi (TXT)", ["public", "unlisted", "private"], key="p2")
+    if up and st.button("Import", type="primary"):
+        st.session_state.schedules = parse_txt(
+            up.read().decode("utf-8"), int(lead), int(gap), privacy2)
+        save()
+        st.success(f"{len(st.session_state.schedules)} jadwal diimpor dari TXT.")
+    with st.expander("Contoh format TXT"):
+        st.code("""Alaska High School Football
 SWDP Private School vs Kodiak
 Archangels @ Bears
-📺watch live: @url:`https://example.com/live`
+📺watch live: https://example.com/live
 🗒️The SWDP varsity football team has an away game @ Kodiak.
 
 #Alaska #AKHSFootball""", language="text")
