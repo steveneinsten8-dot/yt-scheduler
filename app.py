@@ -308,7 +308,7 @@ with tab_run:
         lines = []
         def say(s):
             lines.append(s)
-            log.code("\n".join(lines[-20:]))
+            log.code("\n".join(lines))
         stream_id = S.ensure_stream(yt)
         say(f"liveStream: {stream_id}")
         have = S.existing_keys(yt)
