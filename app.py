@@ -309,11 +309,20 @@ with tab_run:
         def say(s):
             lines.append(s)
             log.code("\n".join(lines))
-        stream_id = S.ensure_stream(yt)
-        say(f"liveStream: {stream_id}")
-        have = S.existing_keys(yt)
         ok = fail = skip = 0
         prog = st.progress(0.0)
+        try:
+            stream_id = S.ensure_stream(yt)
+            say(f"liveStream: {stream_id}")
+            have = S.existing_keys(yt)
+        except Exception as e:
+            # Setup gagal: tetap keluarkan satu FAIL untuk tiap jadwal.
+            for n, it in enumerate(items, 1):
+                fail += 1
+                say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
+                prog.progress(n / len(items))
+            st.error(f"Semua jadwal gagal: {e}")
+            st.stop()
         for n, it in enumerate(items, 1):
             try:
                 key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
