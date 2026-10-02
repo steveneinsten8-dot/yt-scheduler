@@ -214,13 +214,21 @@ def create(yt, item, stream_id, thumbnail=None):
     return bc["id"]
 
 
-def with_retry(fn, attempts=6, base=5):
+def is_rate_limit(e):
+    """True kalau error = YouTube membatasi kecepatan request.
+    Pesan aslinya 'User requests exceed the rate limit.' (spasi), bukan camelCase."""
+    m = str(e).lower()
+    return getattr(getattr(e, "resp", None), "status", None) == 403 and \
+        ("rate limit" in m or "ratelimit" in m)
+
+
+def with_retry(fn, attempts=6, base=15):
     """Ulangi saat kena rate limit YouTube (403 userRequestsExceedRateLimit)."""
     for i in range(attempts):
         try:
             return fn()
         except HttpError as e:
-            if e.resp.status != 403 or "rateLimit" not in str(e) or i == attempts - 1:
+            if not is_rate_limit(e) or i == attempts - 1:
                 raise
             wait = base * 2 ** i
             print(f"    rate limit, tunggu {wait}s...")
