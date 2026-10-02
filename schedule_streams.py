@@ -136,14 +136,15 @@ def set_banner(yt, data):
     Dua langkah: channelBanners.insert -> URL, lalu channels.update."""
     media = MediaIoBaseUpload(io.BytesIO(data), mimetype="image/png", resumable=False)
     res = with_retry(lambda: yt.channelBanners().insert(
-        part="snippet", media_body=media).execute()) or {}
+        media_body=media).execute()) or {}
     url = res["url"]
     mine = with_retry(lambda: yt.channels().list(part="brandingSettings", mine=True).execute())
-    ch = dict(mine["items"][0])
-    bs = ch.setdefault("brandingSettings", {}).setdefault("image", {})
-    bs["bannerExternalUrl"] = url
+    ch = mine["items"][0]
+    bs = dict(ch.get("brandingSettings") or {})
+    bs.setdefault("image", {})["bannerExternalUrl"] = url
     return with_retry(lambda: yt.channels().update(
-        part="brandingSettings", body={"brandingSettings": {"image": bs}}).execute())
+        part="brandingSettings",
+        body={"id": ch["id"], "brandingSettings": bs}).execute())
 
 
 def ensure_stream(yt, title="Auto Stream"):
@@ -348,6 +349,31 @@ def _selftest():
     assert account_dir("alice") == os.path.join(ACCOUNTS, "alice")
     assert account_dir(None) == HERE and account_dir("default") == HERE
     assert token_path("alice").endswith(os.path.join("accounts", "alice", "token.pickle"))
+    # set_banner: insert TANPA kwarg part, update pakai id channel (mock service)
+    bcalls = []
+    class _Banners:
+        def insert(self, **kw):
+            bcalls.append(("insert", kw))
+            class _E:
+                def execute(self): return {"url": "https://yt/be.jpg"}
+            return _E()
+    class _Channels:
+        def list(self, **kw):
+            class _E:
+                def execute(self): return {"items": [{"id": "CH1", "brandingSettings": {"image": {}}}]}
+            return _E()
+        def update(self, **kw):
+            bcalls.append(("update", kw))
+            class _E:
+                def execute(self): return kw["body"]
+            return _E()
+    class _BannerYt:
+        def channelBanners(self): return _Banners()
+        def channels(self): return _Channels()
+    set_banner(_BannerYt(), b"\x89PNG fake")
+    assert bcalls[0][0] == "insert" and "part" not in bcalls[0][1]
+    assert bcalls[1][1]["body"]["id"] == "CH1"
+    assert bcalls[1][1]["body"]["brandingSettings"]["image"]["bannerExternalUrl"] == "https://yt/be.jpg"
     # ensure_stream membuat liveStream saat daftar kosong (mock service)
     class _Streams:
         def list(self, **kw):
