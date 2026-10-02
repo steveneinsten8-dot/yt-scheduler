@@ -325,11 +325,7 @@ with tab_run:
         def say(s):
             lines.append(s)
             log.code("\n".join(lines[-20:]))
-        streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
-        if not streams:
-            st.error("Belum ada liveStream. Buat dulu di YouTube Studio.")
-            st.stop()
-        stream_id = streams[0]["id"]
+        stream_id = S.ensure_stream(yt)
         say(f"liveStream: {stream_id}")
         have = S.existing_keys(yt)
         ok = fail = skip = 0

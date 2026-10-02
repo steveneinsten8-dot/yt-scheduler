@@ -131,6 +131,21 @@ def set_thumbnail(yt, video_id, data):
         videoId=video_id, media_body=media).execute())
 
 
+def ensure_stream(yt, title="Auto Stream"):
+    """Pakai liveStream milik channel; buat otomatis jika belum ada."""
+    result = with_retry(lambda: yt.liveStreams().list(
+        part="id,snippet,cdn", mine=True, maxResults=50).execute()) or {}
+    streams = result.get("items", [])
+    if streams:
+        return streams[0]["id"]
+    body = {
+        "snippet": {"title": title},
+        "cdn": {"ingestionType": "rtmp", "resolution": "variable", "frameRate": "variable"},
+    }
+    return (with_retry(lambda: yt.liveStreams().insert(
+        part="snippet,cdn", body=body).execute()) or {})["id"]
+
+
 def create(yt, item, stream_id, thumbnail=None):
     body = {
         "snippet": {
@@ -279,10 +294,7 @@ def main():
     print(f"Akun: {whoami(yt)}  (profil: {args.account or 'default'})")
     stream_id = args.stream_id
     if not stream_id:
-        streams = yt.liveStreams().list(part="id", mine=True).execute().get("items", [])
-        if not streams:
-            sys.exit("Belum ada liveStream. Buat satu dulu di YouTube Studio (Stream settings).")
-        stream_id = streams[0]["id"]
+        stream_id = ensure_stream(yt)
         print("Pakai liveStream:", stream_id)
 
     thumb = None
@@ -321,6 +333,19 @@ def _selftest():
     assert account_dir("alice") == os.path.join(ACCOUNTS, "alice")
     assert account_dir(None) == HERE and account_dir("default") == HERE
     assert token_path("alice").endswith(os.path.join("accounts", "alice", "token.pickle"))
+    # ensure_stream membuat liveStream saat daftar kosong (mock service)
+    class _Streams:
+        def list(self, **kw):
+            class _E:
+                def execute(self): return {"items": []}
+            return _E()
+        def insert(self, **kw):
+            class _E:
+                def execute(self): return {"id": "STREAM123"}
+            return _E()
+    class _StreamYt:
+        def liveStreams(self): return _Streams()
+    assert ensure_stream(_StreamYt()) == "STREAM123"
     # set_thumbnail: kirim bytes gambar via thumbnails().set (mock service)
     calls = {}
     class _Th:
