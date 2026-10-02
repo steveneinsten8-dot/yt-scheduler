@@ -186,11 +186,11 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat", "5️⃣ Banner Channel"]
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
+tab_gen, tab_edit, tab_run, tab_chat, tab_banner = tab_list[:5]
 
 with tab_gen:
     mode = st.radio("Sumber jadwal", ["Berkala (otomatis)", "Import TXT"], horizontal=True)
@@ -393,6 +393,20 @@ with tab_chat:
                     miss += 1
             st.success(f"{sent} terkirim · {miss} tanpa komentar")
 
+with tab_banner:
+    st.caption(f"Pasang banner untuk channel `{pick}`. Rekomendasi 2560×1152 px (min 2048×1152, 16:9), maks 6 MB.")
+    st.warning("⚠️ Foto profil channel TIDAK bisa lewat API — hanya banner yang bisa.")
+    banner_file = st.file_uploader("Gambar banner (JPG/PNG)", type=["jpg", "jpeg", "png"], key="banner")
+    if st.button("🖼️ Pasang banner ke channel", type="primary"):
+        if not banner_file:
+            st.error("Pilih gambar banner dulu.")
+        else:
+            try:
+                S.set_banner(yt, banner_file.getvalue())
+                st.success(f"Banner terpasang di channel `{pick}`. Cek di YouTube Studio (bisa perlu refresh).")
+            except Exception as e:
+                st.error(f"Gagal pasang banner: {e}")
+
 if role == "admin":
-    with tab_list[4]:
+    with tab_list[-1]:
         _admin_panel(user)

@@ -131,6 +131,21 @@ def set_thumbnail(yt, video_id, data):
         videoId=video_id, media_body=media).execute())
 
 
+def set_banner(yt, data):
+    """Upload + pasang banner channel. `data` = bytes JPEG/PNG.
+    Dua langkah: channelBanners.insert -> URL, lalu channels.update."""
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype="image/png", resumable=False)
+    res = with_retry(lambda: yt.channelBanners().insert(
+        part="snippet", media_body=media).execute()) or {}
+    url = res["url"]
+    mine = with_retry(lambda: yt.channels().list(part="brandingSettings", mine=True).execute())
+    ch = dict(mine["items"][0])
+    bs = ch.setdefault("brandingSettings", {}).setdefault("image", {})
+    bs["bannerExternalUrl"] = url
+    return with_retry(lambda: yt.channels().update(
+        part="brandingSettings", body={"brandingSettings": {"image": bs}}).execute())
+
+
 def ensure_stream(yt, title="Auto Stream"):
     """Pakai liveStream milik channel; buat otomatis jika belum ada."""
     result = with_retry(lambda: yt.liveStreams().list(
