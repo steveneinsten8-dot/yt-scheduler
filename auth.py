@@ -377,6 +377,26 @@ def handle_callback():
     _set_cookie(COOKIE, _pack(user))
 
 
+def logout_channel(user, channel_id):
+    """Putuskan OAuth dan hapus token channel dari akun app."""
+    data = store.load(user)
+    ch = (data.get("channels") or {}).get(channel_id)
+    if not ch:
+        return False
+    tok = ch.get("token") or {}
+    if tok.get("refresh_token"):
+        try:
+            requests.post(TOKEN_URI.replace("oauth2.googleapis.com/token", "oauth2.googleapis.com/revoke"),
+                          params={"token": tok["refresh_token"]}, timeout=10)
+        except requests.RequestException:
+            pass
+    data["channels"].pop(channel_id, None)
+    if data.get("channel_id") == channel_id:
+        data["channel_id"] = next(iter(data["channels"]), None)
+    store.save(user, data)
+    return True
+
+
 def youtube_for(user, channel_id):
     """(service YouTube, data user) untuk channel ini; refresh token bila perlu."""
     data = store.load(user)

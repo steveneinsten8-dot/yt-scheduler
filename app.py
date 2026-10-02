@@ -83,6 +83,9 @@ if channels:
         data["channel_id"] = pick
         store.save(user, data)
         st.rerun()
+    if st.sidebar.button("🚪 Logout channel aktif"):
+        auth.logout_channel(user, pick)
+        st.rerun()
 else:
     pick = None
     st.sidebar.warning("Belum ada channel. Hubungkan di bawah.")
