@@ -134,7 +134,8 @@ def set_thumbnail(yt, video_id, data):
 def set_banner(yt, data):
     """Upload + pasang banner channel. `data` = bytes JPEG/PNG.
     Dua langkah: channelBanners.insert -> URL, lalu channels.update."""
-    media = MediaIoBaseUpload(io.BytesIO(data), mimetype="image/png", resumable=False)
+    mime = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mime, resumable=False)
     res = with_retry(lambda: yt.channelBanners().insert(
         media_body=media).execute()) or {}
     url = res["url"]
