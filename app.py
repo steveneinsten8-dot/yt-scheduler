@@ -332,17 +332,13 @@ with tab_run:
             except Exception as e:
                 fail += 1
                 say(f"FAIL {it['start']} {it['title']} — {e}")
-                if S.is_rate_limit(e):
-                    say("⏹️ Rate limit YouTube — hentikan dulu, jalankan ulang beberapa "
-                        "menit lagi (broadcast yang sudah OK akan otomatis di-SKIP).")
-                    prog.progress(n / len(items))
-                    break
             else:
                 ok += 1
+                have.add(key)
                 say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
             time.sleep(1)
             prog.progress(n / len(items))
-        st.success(f"{ok} berhasil · {skip} dilewati · {fail} gagal")
+        st.success(f"{ok} berhasil · {skip} dilewati (sudah ada) · {fail} gagal")
 
 with tab_chat:
     st.info("Komentar dikirim otomatis **saat broadcast dibuat** (bisa sebelum live). "

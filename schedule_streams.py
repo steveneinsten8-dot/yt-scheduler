@@ -341,6 +341,7 @@ def main():
             print(f"FAIL  {it['start']}  {it['title']}  -> {e}")
             continue
         ok += 1
+        have.add((it["title"], _norm(to_rfc3339(it["start"]))))
         print(f"OK  {it['start']}  {it['title']}  -> https://www.youtube.com/watch?v={bid}")
         time.sleep(1)
     print(f"\n{ok} berhasil, {skip} dilewati (sudah ada), {fail} gagal")
