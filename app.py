@@ -190,11 +190,11 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat", "5️⃣ Banner Channel"]
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit, tab_run, tab_chat, tab_banner = tab_list[:5]
+tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
 
 with tab_gen:
     st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "
@@ -211,6 +211,17 @@ with tab_gen:
             up.read().decode("utf-8"), int(lead), int(gap), privacy2)
         save()
         st.success(f"{len(st.session_state.schedules)} jadwal diimpor dari TXT.")
+    
+    st.divider()
+    st.subheader("Banner channel")
+    st.caption("Pasang banner untuk channel aktif (2560×1152 px min., maks 6 MB).")
+    banner_file = st.file_uploader("Gambar banner (JPG/PNG)", type=["jpg", "jpeg", "png"], key="banner_tab1")
+    if banner_file and st.button("🖼️ Pasang banner", key="btn_banner"):
+        try:
+            S.set_banner(yt, banner_file.getvalue())
+            st.success(f"Banner terpasang di channel `{pick}`.")
+        except Exception as e:
+            st.error(f"Gagal pasang banner: {e}")
     with st.expander("Contoh format TXT"):
         st.code("""Alaska High School Football
 SWDP Private School vs Kodiak
@@ -299,6 +310,12 @@ with tab_run:
                 st.write("❌", it.get("start"), it.get("title"), "—", e)
         if bad:
             st.warning(f"{bad} jadwal bermasalah")
+    auto_multi = st.checkbox(
+        "🔀 Auto per channel (blok 30 jadwal → channel berikutnya)", value=False)
+    chunk_size = 30
+    if auto_multi:
+        st.caption(f"{len(channels)} channel terhubung: " +
+                   " → ".join(channels[c].get("title", c) for c in channels))
     if st.button("🚀 Buat di YouTube", type="primary"):
         items = st.session_state.schedules
         if not items:
@@ -309,44 +326,61 @@ with tab_run:
         def say(s):
             lines.append(s)
             log.code("\n".join(lines))
-        ok = fail = skip = 0
-        prog = st.progress(0.0)
-        try:
-            stream_id = S.ensure_stream(yt)
-            say(f"liveStream: {stream_id}")
-            have = S.existing_keys(yt)
-        except Exception as e:
-            # Setup gagal: tetap keluarkan satu FAIL untuk tiap jadwal.
-            for n, it in enumerate(items, 1):
-                fail += 1
-                say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
-                prog.progress(n / len(items))
-            st.error(f"Semua jadwal gagal: {e}")
-            st.stop()
-        for n, it in enumerate(items, 1):
+
+        def run_channel(ch_id, yt_ch, batch, label):
+            """Proses satu batch di satu channel. Return (ok, skip, fail)."""
             try:
-                key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
+                stream_id = S.ensure_stream(yt_ch)
+                say(f"liveStream [{label}]: {stream_id}")
+                have = S.existing_keys(yt_ch)
             except Exception as e:
-                fail += 1
-                say(f"FAIL {it.get('start')} {it.get('title')} — {e}")
-                prog.progress(n / len(items))
-                continue
-            if key in have:
-                skip += 1
-                say(f"SKIP {it['start']} {it['title']} (sudah ada)")
-                prog.progress(n / len(items))
-                continue
-            try:
-                bid = S.create(yt, it, stream_id, thumb_bytes)
-            except Exception as e:
-                fail += 1
-                say(f"FAIL {it['start']} {it['title']} — {e}")
-            else:
-                ok += 1
-                have.add(key)
-                say(f"OK   {it['start']} {it['title']} → youtube.com/watch?v={bid}")
-            time.sleep(1)
-            prog.progress(n / len(items))
+                for it in batch:
+                    say(f"FAIL [{label}] {it.get('start')} {it.get('title')} — {e}")
+                st.warning(f"Channel `{label}` gagal setup: {e}")
+                return 0, 0, len(batch)
+            o = s = f = 0
+            prog = st.progress(0.0, text=f"[{label}] 0/{len(batch)}")
+            for n, it in enumerate(batch, 1):
+                try:
+                    key = (it["title"], S._norm(S.to_rfc3339(it["start"])))
+                except Exception as e:
+                    f += 1
+                    say(f"FAIL [{label}] {it.get('start')} {it.get('title')} — {e}")
+                    prog.progress(n / len(batch), text=f"[{label}] {n}/{len(batch)}")
+                    continue
+                if key in have:
+                    s += 1
+                    say(f"SKIP [{label}] {it['start']} {it['title']} (sudah ada)")
+                    prog.progress(n / len(batch), text=f"[{label}] {n}/{len(batch)}")
+                    continue
+                try:
+                    bid = S.create(yt_ch, it, stream_id, thumb_bytes)
+                except Exception as e:
+                    f += 1
+                    say(f"FAIL [{label}] {it['start']} {it['title']} — {e}")
+                else:
+                    o += 1
+                    have.add(key)
+                    say(f"OK   [{label}] {it['start']} {it['title']} → youtube.com/watch?v={bid}")
+                time.sleep(1)
+                prog.progress(n / len(batch), text=f"[{label}] {n}/{len(batch)}")
+            say(f"—— [{label}] {o} OK · {s} SKIP · {f} FAIL ——")
+            return o, s, f
+
+        ok = skip = fail = 0
+        if auto_multi:
+            ch_ids = list(channels)
+            for i in range(0, len(items), chunk_size):
+                chunk = items[i:i + chunk_size]
+                ch_id = ch_ids[(i // chunk_size) % len(ch_ids)]
+                label = channels[ch_id].get("title", ch_id)
+                say(f"═══ Batch {i//chunk_size + 1}: {len(chunk)} jadwal → {label} ═══")
+                yt_ch, _ = auth.youtube_for(user, ch_id)
+                o, s, f = run_channel(ch_id, yt_ch, chunk, label)
+                ok += o; skip += s; fail += f
+        else:
+            o, s, f = run_channel(pick, yt, items, channels[pick].get("title", pick))
+            ok += o; skip += s; fail += f
         st.success(f"{ok} berhasil · {skip} dilewati (sudah ada) · {fail} gagal")
 
 with tab_chat:
@@ -387,20 +421,6 @@ with tab_chat:
                 else:
                     miss += 1
             st.success(f"{sent} terkirim · {miss} tanpa komentar")
-
-with tab_banner:
-    st.caption(f"Pasang banner untuk channel `{pick}`. Rekomendasi 2560×1152 px (min 2048×1152, 16:9), maks 6 MB.")
-    st.warning("⚠️ Foto profil channel TIDAK bisa lewat API — hanya banner yang bisa.")
-    banner_file = st.file_uploader("Gambar banner (JPG/PNG)", type=["jpg", "jpeg", "png"], key="banner")
-    if st.button("🖼️ Pasang banner ke channel", type="primary"):
-        if not banner_file:
-            st.error("Pilih gambar banner dulu.")
-        else:
-            try:
-                S.set_banner(yt, banner_file.getvalue())
-                st.success(f"Banner terpasang di channel `{pick}`. Cek di YouTube Studio (bisa perlu refresh).")
-            except Exception as e:
-                st.error(f"Gagal pasang banner: {e}")
 
 if role == "admin":
     with tab_list[-1]:
