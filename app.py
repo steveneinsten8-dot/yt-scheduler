@@ -203,10 +203,14 @@ with tab_channels:
     st.caption(f"Total: {len(channels)} channel")
     rows = [{
         "Channel": info.get("title", ch_id),
+        "Buka di YouTube": f"https://www.youtube.com/channel/{ch_id}",
         "ID channel": ch_id,
         "Aktif": "✅" if ch_id == pick else "",
     } for ch_id, info in channels.items()]
-    st.dataframe(rows, width="stretch", hide_index=True)
+    st.dataframe(
+        rows, width="stretch", hide_index=True,
+        column_config={"Buka di YouTube": st.column_config.LinkColumn(
+            "Buka di YouTube", display_text="🔗 Buka channel")})
     st.info("Pilih channel aktif dari sidebar untuk membuat broadcast atau memasang banner.")
 
 with tab_gen:
