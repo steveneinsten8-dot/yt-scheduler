@@ -192,11 +192,22 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat"]
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat", "5️⃣ Channel"]
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit, tab_run, tab_chat = tab_list[:4]
+tab_gen, tab_edit, tab_run, tab_chat, tab_channels = tab_list[:5]
+
+with tab_channels:
+    st.subheader("📺 Channel terhubung")
+    st.caption(f"Total: {len(channels)} channel")
+    rows = [{
+        "Channel": info.get("title", ch_id),
+        "ID channel": ch_id,
+        "Aktif": "✅" if ch_id == pick else "",
+    } for ch_id, info in channels.items()]
+    st.dataframe(rows, width="stretch", hide_index=True)
+    st.info("Pilih channel aktif dari sidebar untuk membuat broadcast atau memasang banner.")
 
 with tab_gen:
     st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "
