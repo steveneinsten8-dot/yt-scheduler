@@ -423,7 +423,12 @@ with tab_run:
                     say(f"FAIL [{channels[pick].get('title', pick)}] {it.get('start')} {it.get('title')} — {e}")
                 f = len(items)
             ok += o; skip += s; fail += f
-        st.success(f"{ok} berhasil · {skip} dilewati (sudah ada) · {fail} gagal")
+        total = ok + skip + fail
+        st.success(
+            f"Selesai: {total}/{len(items)} jadwal diproses · "
+            f"{ok} berhasil · {skip} di-skip (sudah ada) · {fail} gagal")
+        if fail:
+            st.error(f"Periksa log di atas: {fail} jadwal gagal dari {len(items)} jadwal import.")
 
 with tab_chat:
     st.info("Komentar dikirim otomatis **saat broadcast dibuat** (bisa sebelum live). "
