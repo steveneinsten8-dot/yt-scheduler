@@ -189,11 +189,11 @@ def save():
     store.save(user, data)
 
 
-tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat", "5️⃣ Channel"]
+tabs = ["1️⃣ Generate", "2️⃣ Edit & Cek", "3️⃣ Buat di YouTube", "4️⃣ Live Chat", "5️⃣ Channel", "6️⃣ Broadcast"]
 if role == "admin":
     tabs.append("🛠️ Admin")
 tab_list = st.tabs(tabs)
-tab_gen, tab_edit, tab_run, tab_chat, tab_channels = tab_list[:5]
+tab_gen, tab_edit, tab_run, tab_chat, tab_channels, tab_broadcasts = tab_list[:6]
 
 with tab_channels:
     st.subheader("📺 Channel terhubung")
@@ -217,6 +217,32 @@ with tab_channels:
             auth.logout_channel(user, ch_id)
         st.success(f"{len(logout_ids)} channel di-logout.")
         st.rerun()
+
+with tab_broadcasts:
+    st.subheader("🗑️ Kelola broadcast")
+    try:
+        broadcasts = S.list_broadcasts(yt)
+    except Exception as e:
+        st.error(f"Gagal mengambil broadcast: {e}")
+        broadcasts = []
+    if broadcasts:
+        labels = {b[0]: f"{b[1]} · {b[3]} · {b[2]}" for b in broadcasts}
+        selected = st.multiselect("Pilih broadcast", list(labels), format_func=lambda x: labels[x])
+        st.warning("Penghapusan permanen. Broadcast yang sedang live/selesai mungkin ditolak YouTube.")
+        confirm = st.checkbox("Saya paham broadcast terpilih akan dihapus permanen.")
+        if st.button("🗑️ Hapus broadcast terpilih", disabled=not selected or not confirm):
+            ok_del = fail_del = 0
+            for bid in selected:
+                try:
+                    S.delete_broadcast(yt, bid)
+                    st.write(f"OK — {labels[bid]}")
+                    ok_del += 1
+                except Exception as e:
+                    st.error(f"FAIL — {labels[bid]}: {e}")
+                    fail_del += 1
+            st.info(f"Selesai: {ok_del} dihapus · {fail_del} gagal")
+    else:
+        st.info("Belum ada broadcast di channel aktif.")
 
 with tab_gen:
     st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "

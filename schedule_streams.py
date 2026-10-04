@@ -287,6 +287,28 @@ def existing_keys(yt):
     return keys
 
 
+def list_broadcasts(yt, statuses=("upcoming", "active", "completed")):
+    """Daftar broadcast channel: [(id, judul, mulai, status)]."""
+    out = []
+    for status in statuses:
+        req = yt.liveBroadcasts().list(
+            part="snippet,status", broadcastStatus=status, maxResults=50)
+        while req:
+            res = req.execute()
+            for b in res.get("items", []):
+                s = b["snippet"]
+                out.append((b["id"], s.get("title", ""),
+                            s.get("scheduledStartTime", ""), status))
+            req = yt.liveBroadcasts().list_next(req, res)
+    return out
+
+
+def delete_broadcast(yt, broadcast_id):
+    """Hapus broadcast. Hanya yang belum live/selesai bisa dihapus via API."""
+    return with_retry(lambda: yt.liveBroadcasts().delete(
+        id=broadcast_id).execute())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("schedules", nargs="?", default="schedules.json")
