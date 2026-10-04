@@ -222,8 +222,9 @@ def is_rate_limit(e):
         ("rate limit" in m or "ratelimit" in m)
 
 
-def with_retry(fn, attempts=6, base=15):
-    """Ulangi saat kena rate limit YouTube (403 userRequestsExceedRateLimit)."""
+def with_retry(fn, attempts=3, base=8):
+    """Ulangi saat kena rate limit YouTube (403 userRequestsExceedRateLimit).
+    attempts=3, base=8s biar cepat jatuh ke FAIL (stuck <30s) dan log tetap muncul."""
     for i in range(attempts):
         try:
             return fn()
@@ -231,7 +232,7 @@ def with_retry(fn, attempts=6, base=15):
             if not is_rate_limit(e) or i == attempts - 1:
                 raise
             wait = base * 2 ** i
-            print(f"    rate limit, tunggu {wait}s...")
+            print(f"    ⏱️ rate limit, tunggu {wait}s ({i+1}/{attempts})")
             time.sleep(wait)
 
 

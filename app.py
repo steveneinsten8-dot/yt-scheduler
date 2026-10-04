@@ -375,11 +375,23 @@ with tab_run:
                 ch_id = ch_ids[(i // chunk_size) % len(ch_ids)]
                 label = channels[ch_id].get("title", ch_id)
                 say(f"═══ Batch {i//chunk_size + 1}: {len(chunk)} jadwal → {label} ═══")
-                yt_ch, _ = auth.youtube_for(user, ch_id)
-                o, s, f = run_channel(ch_id, yt_ch, chunk, label)
+                o = s = f = 0
+                try:
+                    yt_ch, _ = auth.youtube_for(user, ch_id)
+                    o, s, f = run_channel(ch_id, yt_ch, chunk, label)
+                except Exception as e:
+                    for it in chunk:
+                        say(f"FAIL [{label}] {it.get('start')} {it.get('title')} — {e}")
+                    f = len(chunk)
                 ok += o; skip += s; fail += f
         else:
-            o, s, f = run_channel(pick, yt, items, channels[pick].get("title", pick))
+            o = s = f = 0
+            try:
+                o, s, f = run_channel(pick, yt, items, channels[pick].get("title", pick))
+            except Exception as e:
+                for it in items:
+                    say(f"FAIL [{channels[pick].get('title', pick)}] {it.get('start')} {it.get('title')} — {e}")
+                f = len(items)
             ok += o; skip += s; fail += f
         st.success(f"{ok} berhasil · {skip} dilewati (sudah ada) · {fail} gagal")
 
