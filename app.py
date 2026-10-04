@@ -216,12 +216,24 @@ with tab_gen:
     st.subheader("Banner channel")
     st.caption("Pasang banner untuk channel aktif (2560×1152 px min., maks 6 MB).")
     banner_file = st.file_uploader("Gambar banner (JPG/PNG)", type=["jpg", "jpeg", "png"], key="banner_tab1")
+    banner_all = st.checkbox("Terapkan ke semua channel", key="banner_all")
     if banner_file and st.button("🖼️ Pasang banner", key="btn_banner"):
-        try:
-            S.set_banner(yt, banner_file.getvalue())
-            st.success(f"Banner terpasang di channel `{pick}`.")
-        except Exception as e:
-            st.error(f"Gagal pasang banner: {e}")
+        targets = list(channels) if banner_all else [pick]
+        ok_banner = fail_banner = 0
+        for ch_id in targets:
+            label = channels[ch_id].get("title", ch_id)
+            try:
+                yt_banner, _ = auth.youtube_for(user, ch_id)
+                S.set_banner(yt_banner, banner_file.getvalue())
+                ok_banner += 1
+                st.write(f"OK — {label}")
+            except Exception as e:
+                fail_banner += 1
+                st.error(f"FAIL — {label}: {e}")
+        if fail_banner:
+            st.warning(f"Banner: {ok_banner} berhasil · {fail_banner} gagal")
+        else:
+            st.success(f"Banner terpasang ke {ok_banner} channel.")
     with st.expander("Contoh format TXT"):
         st.code("""Alaska High School Football
 SWDP Private School vs Kodiak
