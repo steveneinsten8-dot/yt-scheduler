@@ -2,10 +2,12 @@
 """UI Streamlit jadwal live YouTube. Login app (admin/user), tiap pengguna
 punya client_secret.json + channel sendiri. Jalankan: ./ui.sh"""
 from datetime import datetime
+import io
 import re
 import time
 
 import streamlit as st
+from PIL import Image
 
 import auth
 import store
@@ -217,14 +219,25 @@ with tab_gen:
     st.caption("Pasang banner untuk channel aktif (2560×1152 px min., maks 6 MB).")
     banner_file = st.file_uploader("Gambar banner (JPG/PNG)", type=["jpg", "jpeg", "png"], key="banner_tab1")
     banner_all = st.checkbox("Terapkan ke semua channel", key="banner_all")
-    if banner_file and st.button("🖼️ Pasang banner", key="btn_banner"):
+    banner_bytes = None
+    if banner_file:
+        try:
+            img = Image.open(banner_file).convert("RGB")
+            img = img.resize((2560, 1152), Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, format="JPEG", quality=92, optimize=True)
+            banner_bytes = out.getvalue()
+            st.caption("Gambar otomatis diubah ke 2560×1152 px.")
+        except Exception as e:
+            st.error(f"Gambar banner tidak valid: {e}")
+    if banner_bytes and st.button("🖼️ Pasang banner", key="btn_banner"):
         targets = list(channels) if banner_all else [pick]
         ok_banner = fail_banner = 0
         for ch_id in targets:
             label = channels[ch_id].get("title", ch_id)
             try:
                 yt_banner, _ = auth.youtube_for(user, ch_id)
-                S.set_banner(yt_banner, banner_file.getvalue())
+                S.set_banner(yt_banner, banner_bytes)
                 ok_banner += 1
                 st.write(f"OK — {label}")
             except Exception as e:
