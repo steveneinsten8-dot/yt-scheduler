@@ -85,9 +85,6 @@ if channels:
         data["channel_id"] = pick
         store.save(user, data)
         st.rerun()
-    if st.sidebar.button("🚪 Logout channel aktif"):
-        auth.logout_channel(user, pick)
-        st.rerun()
 else:
     pick = None
     st.sidebar.warning("Belum ada channel. Hubungkan di bawah.")
@@ -212,6 +209,14 @@ with tab_channels:
         column_config={"Buka di YouTube": st.column_config.LinkColumn(
             "Buka di YouTube", display_text="🔗 Buka channel")})
     st.info("Pilih channel aktif dari sidebar untuk membuat broadcast atau memasang banner.")
+    logout_ids = st.multiselect(
+        "Pilih channel untuk logout", list(channels),
+        format_func=lambda c: channels[c].get("title", c), key="logout_channels")
+    if st.button("🚪 Logout channel terpilih", disabled=not logout_ids):
+        for ch_id in logout_ids:
+            auth.logout_channel(user, ch_id)
+        st.success(f"{len(logout_ids)} channel di-logout.")
+        st.rerun()
 
 with tab_gen:
     st.caption("Tiap jadwal = 1 blok, dipisah **baris kosong**. "
