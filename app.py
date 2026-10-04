@@ -223,11 +223,16 @@ with tab_gen:
     if banner_file:
         try:
             img = Image.open(banner_file).convert("RGB")
-            img = img.resize((2560, 1152), Image.Resampling.LANCZOS)
+            tw, th = 2560, 1440                       # rekomendasi YouTube (16:9)
+            r = max(tw / img.width, th / img.height)  # skala "cover" biar tak gepeng
+            img = img.resize((round(img.width * r), round(img.height * r)),
+                             Image.Resampling.LANCZOS)
+            left, top = (img.width - tw) // 2, (img.height - th) // 2
+            img = img.crop((left, top, left + tw, top + th))   # crop tengah
             out = io.BytesIO()
             img.save(out, format="JPEG", quality=92, optimize=True)
             banner_bytes = out.getvalue()
-            st.caption("Gambar otomatis diubah ke 2560×1152 px.")
+            st.caption("Gambar otomatis diubah ke 2560×1440 px (16:9, crop tengah).")
         except Exception as e:
             st.error(f"Gambar banner tidak valid: {e}")
     if banner_bytes and st.button("🖼️ Pasang banner", key="btn_banner"):
